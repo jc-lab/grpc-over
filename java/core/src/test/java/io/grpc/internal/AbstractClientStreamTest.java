@@ -112,8 +112,7 @@ public class AbstractClientStreamTest {
   @Test
   public void cancel_doNotAcceptOk() {
     for (Code code : Code.values()) {
-      ClientStreamListener listener = new
-              it add NoopClientStreamListener();
+      ClientStreamListener listener = new NoopClientStreamListener();
       AbstractClientStream stream =
           new BaseAbstractClientStream(allocator, statsTraceCtx, transportTracer);
       stream.start(listener);
