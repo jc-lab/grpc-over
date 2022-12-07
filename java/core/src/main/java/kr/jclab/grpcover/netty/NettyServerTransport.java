@@ -57,7 +57,6 @@ class NettyServerTransport implements ServerTransport {
   private final InternalLogId logId;
   private final Channel channel;
   private final ChannelPromise channelUnused;
-  private final ProtocolNegotiator protocolNegotiator;
   private final int maxStreams;
   // only accessed from channel event loop
   private NettyServerHandler grpcHandler;
@@ -81,7 +80,6 @@ class NettyServerTransport implements ServerTransport {
   NettyServerTransport(
       Channel channel,
       ChannelPromise channelUnused,
-      ProtocolNegotiator protocolNegotiator,
       List<? extends ServerStreamTracer.Factory> streamTracerFactories,
       TransportTracer transportTracer,
       int maxStreams,
@@ -99,7 +97,6 @@ class NettyServerTransport implements ServerTransport {
       Attributes eagAttributes) {
     this.channel = Preconditions.checkNotNull(channel, "channel");
     this.channelUnused = channelUnused;
-    this.protocolNegotiator = Preconditions.checkNotNull(protocolNegotiator, "protocolNegotiator");
     this.streamTracerFactories =
         Preconditions.checkNotNull(streamTracerFactories, "streamTracerFactories");
     this.transportTracer = Preconditions.checkNotNull(transportTracer, "transportTracer");
@@ -140,8 +137,9 @@ class NettyServerTransport implements ServerTransport {
       }
     }
 
-    ChannelHandler negotiationHandler = protocolNegotiator.newHandler(grpcHandler);
-    ChannelHandler bufferingHandler = new WriteBufferingAndExceptionHandler(negotiationHandler);
+    ProtocolNegotiators.GrpcNegotiationHandler negotiationHandler = new ProtocolNegotiators.GrpcNegotiationHandler(grpcHandler);
+    ProtocolNegotiators.WaitUntilActiveHandler waitUntilActiveHandler = new ProtocolNegotiators.WaitUntilActiveHandler(negotiationHandler, grpcHandler.getNegotiationLogger());
+    ChannelHandler bufferingHandler = new WriteBufferingAndExceptionHandler(waitUntilActiveHandler);
 
     ChannelFutureListener terminationNotifier = new TerminationNotifier();
     channelUnused.addListener(terminationNotifier);
@@ -257,23 +255,20 @@ class NettyServerTransport implements ServerTransport {
    */
   private NettyServerHandler createHandler(
       ServerTransportListener transportListener, ChannelPromise channelUnused) {
-    return NettyServerHandler.newHandler(
-        transportListener,
-        channelUnused,
-        streamTracerFactories,
-        transportTracer,
-        maxStreams,
-        autoFlowControl,
-        flowControlWindow,
-        maxHeaderListSize,
-        maxMessageSize,
-        keepAliveTimeInNanos,
-        keepAliveTimeoutInNanos,
-        maxConnectionIdleInNanos,
-        maxConnectionAgeInNanos,
-        maxConnectionAgeGraceInNanos,
-        permitKeepAliveWithoutCalls,
-        permitKeepAliveTimeInNanos,
-        eagAttributes);
+    return NettyServerHandler.builder()
+            .transportListener(transportListener)
+            .channelUnused(channelUnused)
+            .streamTracerFactories(streamTracerFactories)
+            .transportTracer(transportTracer)
+            .maxStreams(maxStreams)
+            .maxMessageSize(maxMessageSize)
+            .keepAliveTimeInNanos(keepAliveTimeInNanos)
+            .keepAliveTimeoutInNanos(keepAliveTimeoutInNanos)
+            .maxConnectionIdleInNanos(maxConnectionIdleInNanos)
+            .maxConnectionAgeInNanos(maxConnectionAgeInNanos)
+            .maxConnectionAgeGraceInNanos(maxConnectionAgeGraceInNanos)
+            .permitKeepAliveWithoutCalls(permitKeepAliveWithoutCalls)
+            .permitKeepAliveTimeInNanos(permitKeepAliveTimeInNanos)
+            .build();
   }
 }

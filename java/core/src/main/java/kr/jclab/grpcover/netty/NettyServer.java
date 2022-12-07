@@ -24,29 +24,20 @@ import io.grpc.*;
 import io.grpc.InternalChannelz.SocketStats;
 import io.grpc.internal.InternalServer;
 import io.grpc.internal.*;
-import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.*;
-import io.netty.channel.group.ChannelGroup;
-import io.netty.channel.group.ChannelGroupFuture;
-import io.netty.channel.group.ChannelGroupFutureListener;
-import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.util.AbstractReferenceCounted;
-import io.netty.util.ReferenceCounted;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
+import kr.jclab.grpcover.portable.GofChannelInitializer;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.util.*;
-import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static io.grpc.netty.NettyServerBuilder.MAX_CONNECTION_AGE_NANOS_DISABLED;
-import static io.netty.channel.ChannelOption.ALLOCATOR;
-import static io.netty.channel.ChannelOption.SO_KEEPALIVE;
 
 /**
  * Netty-based server implementation.
@@ -55,19 +46,14 @@ class NettyServer implements InternalServer, InternalWithLogId {
   private static final Logger log = Logger.getLogger(InternalServer.class.getName());
 
   private final InternalLogId logId;
-  private final List<? extends SocketAddress> addresses;
-  private final ChannelFactory<? extends ServerChannel> channelFactory;
-  private final Map<ChannelOption<?>, ?> channelOptions;
-  private final Map<ChannelOption<?>, ?> childChannelOptions;
-  private final ProtocolNegotiator protocolNegotiator;
+  @Nullable
+  private final Channel parentChannel;
+  private final GofChannelInitializer channelInitializer;
   private final int maxStreamsPerConnection;
-  private final ObjectPool<? extends EventLoopGroup> bossGroupPool;
-  private final ObjectPool<? extends EventLoopGroup> workerGroupPool;
   private final boolean forceHeapBuffer;
   private EventLoopGroup bossGroup;
   private EventLoopGroup workerGroup;
   private ServerListener listener;
-  private final ChannelGroup channelGroup;
   private final boolean autoFlowControl;
   private final int flowControlWindow;
   private final int maxMessageSize;
@@ -80,25 +66,18 @@ class NettyServer implements InternalServer, InternalWithLogId {
   private final boolean permitKeepAliveWithoutCalls;
   private final long permitKeepAliveTimeInNanos;
   private final Attributes eagAttributes;
-  private final ReferenceCounted sharedResourceReferenceCounter =
-      new SharedResourceReferenceCounter();
   private final List<? extends ServerStreamTracer.Factory> streamTracerFactories;
   private final TransportTracer.Factory transportTracerFactory;
   private final InternalChannelz channelz;
   private volatile List<InternalInstrumented<SocketStats>> listenSocketStatsList =
       Collections.emptyList();
   private volatile boolean terminated;
-  private final EventLoop bossExecutor;
 
   NettyServer(
-      List<? extends SocketAddress> addresses,
-      ChannelFactory<? extends ServerChannel> channelFactory,
-      Map<ChannelOption<?>, ?> channelOptions,
-      Map<ChannelOption<?>, ?> childChannelOptions,
-      ObjectPool<? extends EventLoopGroup> bossGroupPool,
-      ObjectPool<? extends EventLoopGroup> workerGroupPool,
+      Channel parentChannel,
+      GofChannelInitializer channelInitializer,
+      EventLoopGroup workerGroup,
       boolean forceHeapBuffer,
-      ProtocolNegotiator protocolNegotiator,
       List<? extends ServerStreamTracer.Factory> streamTracerFactories,
       TransportTracer.Factory transportTracerFactory,
       int maxStreamsPerConnection, boolean autoFlowControl, int flowControlWindow,
@@ -108,20 +87,10 @@ class NettyServer implements InternalServer, InternalWithLogId {
       long maxConnectionAgeInNanos, long maxConnectionAgeGraceInNanos,
       boolean permitKeepAliveWithoutCalls, long permitKeepAliveTimeInNanos,
       Attributes eagAttributes, InternalChannelz channelz) {
-    this.addresses = checkNotNull(addresses, "addresses");
-    this.channelFactory = checkNotNull(channelFactory, "channelFactory");
-    checkNotNull(channelOptions, "channelOptions");
-    this.channelOptions = new HashMap<ChannelOption<?>, Object>(channelOptions);
-    checkNotNull(childChannelOptions, "childChannelOptions");
-    this.childChannelOptions = new HashMap<ChannelOption<?>, Object>(childChannelOptions);
-    this.bossGroupPool = checkNotNull(bossGroupPool, "bossGroupPool");
-    this.workerGroupPool = checkNotNull(workerGroupPool, "workerGroupPool");
+    this.parentChannel = parentChannel;
+    this.channelInitializer = checkNotNull(channelInitializer, "channelInitializer");
+    this.workerGroup = checkNotNull(workerGroup, "workerGroup");
     this.forceHeapBuffer = forceHeapBuffer;
-    this.bossGroup = bossGroupPool.getObject();
-    this.bossExecutor = bossGroup.next();
-    this.channelGroup = new DefaultChannelGroup(this.bossExecutor);
-    this.workerGroup = workerGroupPool.getObject();
-    this.protocolNegotiator = checkNotNull(protocolNegotiator, "protocolNegotiator");
     this.streamTracerFactories = checkNotNull(streamTracerFactories, "streamTracerFactories");
     this.transportTracerFactory = transportTracerFactory;
     this.maxStreamsPerConnection = maxStreamsPerConnection;
@@ -138,32 +107,23 @@ class NettyServer implements InternalServer, InternalWithLogId {
     this.permitKeepAliveTimeInNanos = permitKeepAliveTimeInNanos;
     this.eagAttributes = checkNotNull(eagAttributes, "eagAttributes");
     this.channelz = Preconditions.checkNotNull(channelz);
-    this.logId = InternalLogId.allocate(getClass(), addresses.isEmpty() ? "No address" :
-        String.valueOf(addresses));
+    this.logId = InternalLogId.allocate(getClass(), "No address");
   }
 
   @Override
   public SocketAddress getListenSocketAddress() {
-    Iterator<Channel> it = channelGroup.iterator();
-    if (it.hasNext()) {
-      return it.next().localAddress();
-    } else {
-      // server is not listening/bound yet, just return the original port.
-      return addresses.isEmpty() ? null : addresses.get(0);
+    if (parentChannel != null) {
+      return parentChannel.localAddress();
     }
+    return null;
   }
 
   @Override
   public List<SocketAddress> getListenSocketAddresses() {
-    List<SocketAddress> listenSocketAddresses = new ArrayList<>();
-    for (Channel c: channelGroup) {
-      listenSocketAddresses.add(c.localAddress());
+    if (parentChannel != null) {
+      return Collections.singletonList(parentChannel.localAddress());
     }
-    // server is not listening/bound yet, just return the original ports.
-    if (listenSocketAddresses.isEmpty())  {
-      listenSocketAddresses.addAll(addresses);
-    }
-    return listenSocketAddresses;
+    return Collections.emptyList();
   }
 
   @Override
@@ -181,63 +141,37 @@ class NettyServer implements InternalServer, InternalWithLogId {
   public void start(ServerListener serverListener) throws IOException {
     listener = checkNotNull(serverListener, "serverListener");
 
-    final ServerBootstrap b = new ServerBootstrap();
-    b.option(ALLOCATOR, Utils.getByteBufAllocator(forceHeapBuffer));
-    b.childOption(ALLOCATOR, Utils.getByteBufAllocator(forceHeapBuffer));
-    b.group(bossExecutor, workerGroup);
-    b.channelFactory(channelFactory);
-    // For non-socket based channel, the option will be ignored.
-    b.childOption(SO_KEEPALIVE, true);
-
-    if (channelOptions != null) {
-      for (Map.Entry<ChannelOption<?>, ?> entry : channelOptions.entrySet()) {
-        @SuppressWarnings("unchecked")
-        ChannelOption<Object> key = (ChannelOption<Object>) entry.getKey();
-        b.option(key, entry.getValue());
-      }
-    }
-
-    if (childChannelOptions != null) {
-      for (Map.Entry<ChannelOption<?>, ?> entry : childChannelOptions.entrySet()) {
-        @SuppressWarnings("unchecked")
-        ChannelOption<Object> key = (ChannelOption<Object>) entry.getKey();
-        b.childOption(key, entry.getValue());
-      }
-    }
-
-    b.childHandler(new ChannelInitializer<Channel>() {
+    channelInitializer.attachGofServerHandlerBuilder(new ServerHandlerBuilder() {
       @Override
-      public void initChannel(Channel ch) {
-
+      public void build(Channel ch) {
         ChannelPromise channelDone = ch.newPromise();
 
         long maxConnectionAgeInNanos = NettyServer.this.maxConnectionAgeInNanos;
-        if (maxConnectionAgeInNanos != MAX_CONNECTION_AGE_NANOS_DISABLED) {
+        if (maxConnectionAgeInNanos != NettyServerBuilder.MAX_CONNECTION_AGE_NANOS_DISABLED) {
           // apply a random jitter of +/-10% to max connection age
           maxConnectionAgeInNanos =
-              (long) ((.9D + Math.random() * .2D) * maxConnectionAgeInNanos);
+                  (long) ((.9D + Math.random() * .2D) * maxConnectionAgeInNanos);
         }
 
         NettyServerTransport transport =
-            new NettyServerTransport(
-                ch,
-                channelDone,
-                protocolNegotiator,
-                streamTracerFactories,
-                transportTracerFactory.create(),
-                maxStreamsPerConnection,
-                autoFlowControl,
-                flowControlWindow,
-                maxMessageSize,
-                maxHeaderListSize,
-                keepAliveTimeInNanos,
-                keepAliveTimeoutInNanos,
-                maxConnectionIdleInNanos,
-                maxConnectionAgeInNanos,
-                maxConnectionAgeGraceInNanos,
-                permitKeepAliveWithoutCalls,
-                permitKeepAliveTimeInNanos,
-                eagAttributes);
+                new NettyServerTransport(
+                        ch,
+                        channelDone,
+                        streamTracerFactories,
+                        transportTracerFactory.create(),
+                        maxStreamsPerConnection,
+                        autoFlowControl,
+                        flowControlWindow,
+                        maxMessageSize,
+                        maxHeaderListSize,
+                        keepAliveTimeInNanos,
+                        keepAliveTimeoutInNanos,
+                        maxConnectionIdleInNanos,
+                        maxConnectionAgeInNanos,
+                        maxConnectionAgeGraceInNanos,
+                        permitKeepAliveWithoutCalls,
+                        permitKeepAliveTimeInNanos,
+                        eagAttributes);
         ServerTransportListener transportListener;
         // This is to order callbacks on the listener, not to guard access to channel.
         synchronized (NettyServer.this) {
@@ -248,70 +182,20 @@ class NettyServer implements InternalServer, InternalWithLogId {
           }
           // `channel` shutdown can race with `ch` initialization, so this is only safe to increment
           // inside the lock.
-          sharedResourceReferenceCounter.retain();
           transportListener = listener.transportCreated(transport);
         }
 
-        /**
-         * Releases the event loop if the channel is "done", possibly due to the channel closing.
-         */
-        final class LoopReleaser implements ChannelFutureListener {
-          private boolean done;
-
-          @Override
-          public void operationComplete(ChannelFuture future) throws Exception {
-            if (!done) {
-              done = true;
-              sharedResourceReferenceCounter.release();
-            }
-          }
-        }
-
         transport.start(transportListener);
-        ChannelFutureListener loopReleaser = new LoopReleaser();
-        channelDone.addListener(loopReleaser);
-        ch.closeFuture().addListener(loopReleaser);
       }
     });
-    Future<Map<ChannelFuture, SocketAddress>> bindCallFuture =
-        bossExecutor.submit(
-            new Callable<Map<ChannelFuture, SocketAddress>>() {
-          @Override
-          public Map<ChannelFuture, SocketAddress> call() {
-            Map<ChannelFuture, SocketAddress> bindFutures = new HashMap<>();
-            for (SocketAddress address: addresses) {
-                ChannelFuture future = b.bind(address);
-                channelGroup.add(future.channel());
-                bindFutures.put(future, address);
-            }
-            return bindFutures;
-          }
-        }
-    );
-    Map<ChannelFuture, SocketAddress> channelFutures =
-        bindCallFuture.awaitUninterruptibly().getNow();
 
-    if (!bindCallFuture.isSuccess()) {
-      channelGroup.close().awaitUninterruptibly();
-      throw new IOException(String.format("Failed to bind to addresses %s",
-          addresses), bindCallFuture.cause());
-    }
     final List<InternalInstrumented<SocketStats>> socketStats = new ArrayList<>();
-    for (Map.Entry<ChannelFuture, SocketAddress> entry: channelFutures.entrySet()) {
-      // We'd love to observe interruption, but if interrupted we will need to close the channel,
-      // which itself would need an await() to guarantee the port is not used when the method
-      // returns. See #6850
-      final ChannelFuture future = entry.getKey();
-      if (!future.awaitUninterruptibly().isSuccess()) {
-        channelGroup.close().awaitUninterruptibly();
-        throw new IOException(String.format("Failed to bind to address %s",
-            entry.getValue()), future.cause());
-      }
+    if (parentChannel != null) {
       final InternalInstrumented<SocketStats> listenSocketStats =
-          new ListenSocket(future.channel());
+              new ListenSocket(parentChannel);
       channelz.addListenSocket(listenSocketStats);
       socketStats.add(listenSocketStats);
-      future.channel().closeFuture().addListener(new ChannelFutureListener() {
+      parentChannel.closeFuture().addListener(new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
           channelz.removeListenSocket(listenSocketStats);
@@ -326,27 +210,27 @@ class NettyServer implements InternalServer, InternalWithLogId {
     if (terminated) {
       return;
     }
-    ChannelGroupFuture groupFuture = channelGroup.close()
-        .addListener(new ChannelGroupFutureListener() {
-            @Override
-            public void operationComplete(ChannelGroupFuture future) throws Exception {
-              if (!future.isSuccess()) {
-                log.log(Level.WARNING, "Error closing server channel group", future.cause());
-              }
-              sharedResourceReferenceCounter.release();
-              protocolNegotiator.close();
-              listenSocketStatsList = Collections.emptyList();
-              synchronized (NettyServer.this) {
-                listener.serverShutdown();
-                terminated = true;
-              }
-            }
-        });
-    try {
-      groupFuture.await();
-    } catch (InterruptedException e) {
-      log.log(Level.FINE, "Interrupted while shutting down", e);
-      Thread.currentThread().interrupt();
+    if (parentChannel != null) {
+      ChannelFuture channelFuture = parentChannel.close()
+              .addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                  if (!future.isSuccess()) {
+                    log.log(Level.WARNING, "Error closing server channel group", future.cause());
+                  }
+                  listenSocketStatsList = Collections.emptyList();
+                  synchronized (NettyServer.this) {
+                    listener.serverShutdown();
+                    terminated = true;
+                  }
+                }
+              });
+      try {
+        channelFuture.await();
+      } catch (InterruptedException e) {
+        log.log(Level.FINE, "Interrupted while shutting down", e);
+        Thread.currentThread().interrupt();
+      }
     }
   }
 
@@ -359,33 +243,8 @@ class NettyServer implements InternalServer, InternalWithLogId {
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("logId", logId.getId())
-        .add("addresses", addresses)
+        .add("addresses", getListenSocketAddress())
         .toString();
-  }
-
-  class SharedResourceReferenceCounter extends AbstractReferenceCounted {
-    @Override
-    protected void deallocate() {
-      try {
-        if (bossGroup != null) {
-          bossGroupPool.returnObject(bossGroup);
-        }
-      } finally {
-        bossGroup = null;
-        try {
-          if (workerGroup != null) {
-            workerGroupPool.returnObject(workerGroup);
-          }
-        } finally {
-          workerGroup = null;
-        }
-      }
-    }
-
-    @Override
-    public ReferenceCounted touch(Object hint) {
-      return this;
-    }
   }
 
   /**

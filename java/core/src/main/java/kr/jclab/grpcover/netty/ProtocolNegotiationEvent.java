@@ -19,7 +19,6 @@ package kr.jclab.grpcover.netty;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import io.grpc.Attributes;
-import io.grpc.Internal;
 import io.grpc.InternalChannelz.Security;
 
 import javax.annotation.CheckReturnValue;
@@ -31,35 +30,34 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * Represents a completion of a protocol negotiation stage.
  */
 @CheckReturnValue
-@Internal
 public final class ProtocolNegotiationEvent {
 
-  static final ProtocolNegotiationEvent DEFAULT =
+  public static final ProtocolNegotiationEvent DEFAULT =
       new ProtocolNegotiationEvent(Attributes.EMPTY, /*security=*/ null);
 
   private final Attributes attributes;
   @Nullable
   private final Security security;
 
-  private ProtocolNegotiationEvent(Attributes attributes, @Nullable Security security) {
+  public ProtocolNegotiationEvent(Attributes attributes, @Nullable Security security) {
     this.attributes = checkNotNull(attributes, "attributes");
     this.security = security;
   }
 
   @Nullable
-  Security getSecurity() {
+  public Security getSecurity() {
     return security;
   }
 
-  Attributes getAttributes() {
+  public Attributes getAttributes() {
     return attributes;
   }
 
-  ProtocolNegotiationEvent withAttributes(Attributes attributes) {
+  public ProtocolNegotiationEvent withAttributes(Attributes attributes) {
     return new ProtocolNegotiationEvent(attributes, this.security);
   }
 
-  ProtocolNegotiationEvent withSecurity(@Nullable Security security) {
+  public ProtocolNegotiationEvent withSecurity(@Nullable Security security) {
     return new ProtocolNegotiationEvent(this.attributes, security);
   }
 

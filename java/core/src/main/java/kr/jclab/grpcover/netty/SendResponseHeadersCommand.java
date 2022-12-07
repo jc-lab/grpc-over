@@ -19,28 +19,28 @@ package kr.jclab.grpcover.netty;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import io.grpc.Status;
-import io.netty.handler.codec.http2.Http2Headers;
+import kr.jclab.grpcover.core.protocol.v1.GofProto;
 
 /**
  * Command sent from the transport to the Netty channel to send response headers to the client.
  */
 final class SendResponseHeadersCommand extends WriteQueue.AbstractQueuedCommand {
   private final StreamIdHolder stream;
-  private final Http2Headers headers;
+  private final GofProto.Header headers;
   private final Status status;
 
-  private SendResponseHeadersCommand(StreamIdHolder stream, Http2Headers headers, Status status) {
+  private SendResponseHeadersCommand(StreamIdHolder stream, GofProto.Header headers, Status status) {
     this.stream = Preconditions.checkNotNull(stream, "stream");
     this.headers = Preconditions.checkNotNull(headers, "headers");
     this.status = status;
   }
 
-  static SendResponseHeadersCommand createHeaders(StreamIdHolder stream, Http2Headers headers) {
+  static SendResponseHeadersCommand createHeaders(StreamIdHolder stream, GofProto.Header headers) {
     return new SendResponseHeadersCommand(stream, headers, null);
   }
 
   static SendResponseHeadersCommand createTrailers(
-      StreamIdHolder stream, Http2Headers headers, Status status) {
+        StreamIdHolder stream, GofProto.Header headers, Status status) {
     return new SendResponseHeadersCommand(
         stream, headers, Preconditions.checkNotNull(status, "status"));
   }
@@ -49,7 +49,7 @@ final class SendResponseHeadersCommand extends WriteQueue.AbstractQueuedCommand 
     return stream;
   }
 
-  Http2Headers headers() {
+  GofProto.Header headers() {
     return headers;
   }
 

@@ -17,7 +17,6 @@
 package kr.jclab.grpcover.netty;
 
 import com.google.common.base.Preconditions;
-import com.google.common.io.BaseEncoding;
 import io.grpc.*;
 import io.grpc.internal.*;
 import io.grpc.internal.ClientStreamListener.RpcProgress;
@@ -26,11 +25,10 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.EventLoop;
-import io.netty.handler.codec.http2.Http2Headers;
-import io.netty.handler.codec.http2.Http2Stream;
-import io.netty.util.AsciiString;
 import io.perfmark.PerfMark;
 import io.perfmark.Tag;
+import kr.jclab.grpcover.core.protocol.v1.GofProto;
+import kr.jclab.grpcover.gofprotocol.GofStream;
 
 import javax.annotation.Nullable;
 
@@ -51,35 +49,28 @@ class NettyClientStream extends AbstractClientStream {
   private final TransportState state;
   private final WriteQueue writeQueue;
   private final MethodDescriptor<?, ?> method;
-  private AsciiString authority;
-  private final AsciiString scheme;
-  private final AsciiString userAgent;
+  private String authority;
 
   NettyClientStream(
       TransportState state,
       MethodDescriptor<?, ?> method,
       Metadata headers,
       Channel channel,
-      AsciiString authority,
-      AsciiString scheme,
-      AsciiString userAgent,
+      String authority,
       StatsTraceContext statsTraceCtx,
       TransportTracer transportTracer,
-      CallOptions callOptions,
-      boolean useGetForSafeMethods) {
+      CallOptions callOptions) {
     super(
         new NettyWritableBufferAllocator(channel.alloc()),
         statsTraceCtx,
         transportTracer,
         headers,
         callOptions,
-        useGetForSafeMethods && method.isSafe());
+        false);
     this.state = checkNotNull(state, "transportState");
     this.writeQueue = state.handler.getWriteQueue();
     this.method = checkNotNull(method, "method");
     this.authority = checkNotNull(authority, "authority");
-    this.scheme = checkNotNull(scheme, "scheme");
-    this.userAgent = userAgent;
   }
 
   @Override
@@ -94,7 +85,7 @@ class NettyClientStream extends AbstractClientStream {
 
   @Override
   public void setAuthority(String authority) {
-    this.authority = AsciiString.of(checkNotNull(authority, "authority"));
+    this.authority = checkNotNull(authority, "authority");
   }
 
   @Override
@@ -116,24 +107,7 @@ class NettyClientStream extends AbstractClientStream {
 
     private void writeHeadersInternal(Metadata headers, byte[] requestPayload) {
       // Convert the headers into Netty HTTP/2 headers.
-      AsciiString defaultPath = (AsciiString) methodDescriptorAccessor.geRawMethodName(method);
-      if (defaultPath == null) {
-        defaultPath = new AsciiString("/" + method.getFullMethodName());
-        methodDescriptorAccessor.setRawMethodName(method, defaultPath);
-      }
-      boolean get = (requestPayload != null);
-      AsciiString httpMethod;
-      if (get) {
-        // Forge the query string
-        // TODO(ericgribkoff) Add the key back to the query string
-        defaultPath =
-            new AsciiString(defaultPath + "?" + BaseEncoding.base64().encode(requestPayload));
-        httpMethod = Utils.HTTP_GET_METHOD;
-      } else {
-        httpMethod = Utils.HTTP_METHOD;
-      }
-      Http2Headers http2Headers = Utils.convertClientHeaders(headers, scheme, defaultPath,
-          authority, httpMethod, userAgent);
+      GofProto.Header gofHeaders = Utils.convertClientHeaders(headers, method.getFullMethodName(), authority);
 
       ChannelFutureListener failureListener = new ChannelFutureListener() {
         @Override
@@ -159,8 +133,8 @@ class NettyClientStream extends AbstractClientStream {
       };
       // Write the command requesting the creation of the stream.
       writeQueue.enqueue(
-          new CreateStreamCommand(http2Headers, transportState(), shouldBeCountedForInUse(), get),
-          !method.getType().clientSendsOneMessage() || get).addListener(failureListener);
+          new CreateStreamCommand(gofHeaders, transportState(), shouldBeCountedForInUse()),
+          !method.getType().clientSendsOneMessage() || (requestPayload != null)).addListener(failureListener);
     }
 
     private void writeFrameInternal(
@@ -216,7 +190,7 @@ class NettyClientStream extends AbstractClientStream {
   }
 
   /** This should only be called from the transport thread. */
-  public abstract static class TransportState extends Http2ClientStreamTransportState
+  public abstract static class TransportState extends AbstractGofClientStream.AbstractTransportState
       implements StreamIdHolder {
     private static final int NON_EXISTENT_ID = -1;
 
@@ -224,7 +198,7 @@ class NettyClientStream extends AbstractClientStream {
     private final NettyClientHandler handler;
     private final EventLoop eventLoop;
     private int id;
-    private Http2Stream http2Stream;
+    private GofStream gofStream;
     private Tag tag;
 
     protected TransportState(
@@ -268,13 +242,13 @@ class NettyClientStream extends AbstractClientStream {
     }
 
     /**
-     * Sets the underlying Netty {@link Http2Stream} for this stream. This must be called in the
+     * Sets the underlying Netty {@link GofStream} for this stream. This must be called in the
      * context of the transport thread.
      */
-    public void setHttp2Stream(Http2Stream http2Stream) {
-      checkNotNull(http2Stream, "http2Stream");
-      checkState(this.http2Stream == null, "Can only set http2Stream once");
-      this.http2Stream = http2Stream;
+    public void setGofStream(GofStream gofStream) {
+      checkNotNull(gofStream, "http2Stream");
+      checkState(this.gofStream == null, "Can only set http2Stream once");
+      this.gofStream = gofStream;
 
       // Now that the stream has actually been initialized, call the listener's onReady callback if
       // appropriate.
@@ -283,11 +257,11 @@ class NettyClientStream extends AbstractClientStream {
     }
 
     /**
-     * Gets the underlying Netty {@link Http2Stream} for this stream.
+     * Gets the underlying Netty {@link GofStream} for this stream.
      */
     @Nullable
-    public Http2Stream http2Stream() {
-      return http2Stream;
+    public GofStream http2Stream() {
+      return gofStream;
     }
 
     /**
@@ -296,8 +270,7 @@ class NettyClientStream extends AbstractClientStream {
      */
     protected abstract Status statusFromFailedFuture(ChannelFuture f);
 
-    @Override
-    protected void http2ProcessingFailed(Status status, boolean stopDelivery, Metadata trailers) {
+    protected void gofProcessingFailed(Status status, boolean stopDelivery, Metadata trailers) {
       transportReportStatus(status, stopDelivery, trailers);
       handler.getWriteQueue().enqueue(new CancelClientStreamCommand(this, status), true);
     }
@@ -313,16 +286,16 @@ class NettyClientStream extends AbstractClientStream {
 
     @Override
     public void bytesRead(int processedBytes) {
-      handler.returnProcessedBytes(http2Stream, processedBytes);
+      // handler.returnProcessedBytes(gofStream, processedBytes);
       handler.getWriteQueue().scheduleFlush();
     }
 
     @Override
     public void deframeFailed(Throwable cause) {
-      http2ProcessingFailed(Status.fromThrowable(cause), true, new Metadata());
+      gofProcessingFailed(Status.fromThrowable(cause), true, new Metadata());
     }
 
-    void transportHeadersReceived(Http2Headers headers, boolean endOfStream) {
+    void transportHeadersReceived(GofProto.Header headers, boolean endOfStream) {
       if (endOfStream) {
         if (!isOutboundClosed()) {
           handler.getWriteQueue().enqueue(new CancelClientStreamCommand(this, null), true);

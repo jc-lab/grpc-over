@@ -24,19 +24,12 @@ import io.grpc.*;
 import io.grpc.internal.*;
 import io.grpc.internal.ManagedChannelImplBuilder.ChannelBuilderDefaultPortProvider;
 import io.grpc.internal.ManagedChannelImplBuilder.ClientTransportFactoryBuilder;
-import io.grpc.netty.ProtocolNegotiators.FromChannelCredentialsResult;
-import io.netty.channel.Channel;
 import io.netty.channel.*;
-import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.ssl.SslContext;
+import io.netty.util.AttributeKey;
+import kr.jclab.grpcover.portable.NettyClientBootstrapFactory;
 
-import javax.annotation.Nullable;
-import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -51,6 +44,8 @@ import static io.grpc.internal.GrpcUtil.KEEPALIVE_TIME_NANOS_DISABLED;
 @CheckReturnValue
 public final class NettyChannelBuilder extends
     AbstractManagedChannelImplBuilder<NettyChannelBuilder> {
+  public static AttributeKey<ChannelHandler> GRPC_CHANNEL_HANDLER = AttributeKey.valueOf("GRPC_CHANNEL_HANDLER");
+
 
   // 1MiB.
   public static final int DEFAULT_FLOW_CONTROL_WINDOW = 1024 * 1024;
@@ -58,10 +53,6 @@ public final class NettyChannelBuilder extends
 
   private static final long AS_LARGE_AS_INFINITE = TimeUnit.DAYS.toNanos(1000L);
 
-  private static final ChannelFactory<? extends Channel> DEFAULT_CHANNEL_FACTORY =
-      new ReflectiveChannelFactory<>(Utils.DEFAULT_CLIENT_CHANNEL_TYPE);
-  private static final ObjectPool<? extends EventLoopGroup> DEFAULT_EVENT_LOOP_GROUP_POOL =
-      SharedResourcePool.forResource(Utils.DEFAULT_WORKER_EVENT_LOOP_GROUP);
 
   static {
     String autoFlowControl = System.getenv("GRPC_EXPERIMENTAL_AUTOFLOWCONTROL");
@@ -73,85 +64,44 @@ public final class NettyChannelBuilder extends
 
   private final ManagedChannelImplBuilder managedChannelImplBuilder;
   private TransportTracer.Factory transportTracerFactory = TransportTracer.getDefaultFactory();
-  private final Map<ChannelOption<?>, Object> channelOptions = new HashMap<>();
-  private ChannelFactory<? extends Channel> channelFactory = DEFAULT_CHANNEL_FACTORY;
-  private ObjectPool<? extends EventLoopGroup> eventLoopGroupPool = DEFAULT_EVENT_LOOP_GROUP_POOL;
+  private NettyClientBootstrapFactory clientBootstrapFactory;
   private boolean autoFlowControl = DEFAULT_AUTO_FLOW_CONTROL;
   private int flowControlWindow = DEFAULT_FLOW_CONTROL_WINDOW;
   private int maxHeaderListSize = GrpcUtil.DEFAULT_MAX_HEADER_LIST_SIZE;
   private long keepAliveTimeNanos = KEEPALIVE_TIME_NANOS_DISABLED;
   private long keepAliveTimeoutNanos = DEFAULT_KEEPALIVE_TIMEOUT_NANOS;
   private boolean keepAliveWithoutCalls;
-  private ProtocolNegotiator.ClientFactory protocolNegotiatorFactory
-      = new DefaultProtocolNegotiator();
-  private final boolean freezeProtocolNegotiatorFactory;
-  private LocalSocketPicker localSocketPicker;
 
-  /**
-   * If true, indicates that the transport may use the GET method for RPCs, and may include the
-   * request body in the query params.
-   */
-  private final boolean useGetForSafeMethods = false;
-
-  /**
-   * Creates a new builder with the given server address. This factory method is primarily intended
-   * for using Netty Channel types other than SocketChannel. {@link #forAddress(String, int)} should
-   * generally be preferred over this method, since that API permits delaying DNS lookups and
-   * noticing changes to DNS. If an unresolved InetSocketAddress is passed in, then it will remain
-   * unresolved.
-   */
-  public static NettyChannelBuilder forAddress(SocketAddress serverAddress) {
-    return new NettyChannelBuilder(serverAddress);
+  public static NettyChannelBuilder forTarget(
+          NettyClientBootstrapFactory clientBootstrapFactory,
+          String target,
+          ChannelCredentials channelCreds,
+          CallCredentials callCreds
+  ) {
+    return new NettyChannelBuilder(clientBootstrapFactory, target, channelCreds, callCreds);
   }
 
-  /**
-   * Creates a new builder with the given server address. This factory method is primarily intended
-   * for using Netty Channel types other than SocketChannel.
-   * {@link #forAddress(String, int, ChannelCredentials)} should generally be preferred over this
-   * method, since that API permits delaying DNS lookups and noticing changes to DNS. If an
-   * unresolved InetSocketAddress is passed in, then it will remain unresolved.
-   */
-  public static NettyChannelBuilder forAddress(SocketAddress serverAddress,
-      ChannelCredentials creds) {
-    FromChannelCredentialsResult result = ProtocolNegotiators.from(creds);
-    if (result.error != null) {
-      throw new IllegalArgumentException(result.error);
-    }
-    return new NettyChannelBuilder(serverAddress, creds, result.callCredentials, result.negotiator);
+  public static NettyChannelBuilder forTarget(
+          NettyClientBootstrapFactory clientBootstrapFactory,
+          String target
+  ) {
+    return new NettyChannelBuilder(clientBootstrapFactory, target, null, null);
   }
 
-  /**
-   * Creates a new builder with the given host and port.
-   */
-  public static NettyChannelBuilder forAddress(String host, int port) {
-    return forTarget(GrpcUtil.authorityFromHostAndPort(host, port));
+  public static NettyChannelBuilder forAddress(
+          NettyClientBootstrapFactory clientBootstrapFactory,
+          SocketAddress directServerAddress,
+          ChannelCredentials channelCreds,
+          CallCredentials callCreds
+  ) {
+    return new NettyChannelBuilder(clientBootstrapFactory, directServerAddress, channelCreds, callCreds);
   }
 
-  /**
-   * Creates a new builder with the given host and port.
-   */
-  public static NettyChannelBuilder forAddress(String host, int port, ChannelCredentials creds) {
-    return forTarget(GrpcUtil.authorityFromHostAndPort(host, port), creds);
-  }
-
-  /**
-   * Creates a new builder with the given target string that will be resolved by
-   * {@link io.grpc.NameResolver}.
-   */
-  public static NettyChannelBuilder forTarget(String target) {
-    return new NettyChannelBuilder(target);
-  }
-
-  /**
-   * Creates a new builder with the given target string that will be resolved by
-   * {@link io.grpc.NameResolver}.
-   */
-  public static NettyChannelBuilder forTarget(String target, ChannelCredentials creds) {
-    FromChannelCredentialsResult result = ProtocolNegotiators.from(creds);
-    if (result.error != null) {
-      throw new IllegalArgumentException(result.error);
-    }
-    return new NettyChannelBuilder(target, creds, result.callCredentials, result.negotiator);
+  public static NettyChannelBuilder forAddress(
+          NettyClientBootstrapFactory clientBootstrapFactory,
+          SocketAddress directServerAddress
+  ) {
+    return new NettyChannelBuilder(clientBootstrapFactory, directServerAddress, null, null);
   }
 
   private final class NettyChannelTransportFactoryBuilder implements ClientTransportFactoryBuilder {
@@ -164,46 +114,29 @@ public final class NettyChannelBuilder extends
   private final class NettyChannelDefaultPortProvider implements ChannelBuilderDefaultPortProvider {
     @Override
     public int getDefaultPort() {
-      return protocolNegotiatorFactory.getDefaultPort();
+      return 0;
     }
   }
 
-  NettyChannelBuilder(String target) {
+  NettyChannelBuilder(
+          NettyClientBootstrapFactory clientBootstrapFactory,
+          String target, ChannelCredentials channelCreds, CallCredentials callCreds) {
     managedChannelImplBuilder = new ManagedChannelImplBuilder(target,
-        new NettyChannelTransportFactoryBuilder(),
-        new NettyChannelDefaultPortProvider());
-    this.freezeProtocolNegotiatorFactory = false;
+            channelCreds, callCreds,
+            new NettyChannelTransportFactoryBuilder(),
+            new NettyChannelDefaultPortProvider());
+    this.clientBootstrapFactory = checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
   }
 
   NettyChannelBuilder(
-      String target, ChannelCredentials channelCreds, CallCredentials callCreds,
-      ProtocolNegotiator.ClientFactory negotiator) {
-    managedChannelImplBuilder = new ManagedChannelImplBuilder(
-        target, channelCreds, callCreds,
-        new NettyChannelTransportFactoryBuilder(),
-        new NettyChannelDefaultPortProvider());
-    this.protocolNegotiatorFactory = checkNotNull(negotiator, "negotiator");
-    this.freezeProtocolNegotiatorFactory = true;
-  }
-
-  NettyChannelBuilder(SocketAddress address) {
+          NettyClientBootstrapFactory clientBootstrapFactory,
+          SocketAddress address, ChannelCredentials channelCreds, CallCredentials callCreds) {
     managedChannelImplBuilder = new ManagedChannelImplBuilder(address,
-        getAuthorityFromAddress(address),
-        new NettyChannelTransportFactoryBuilder(),
-        new NettyChannelDefaultPortProvider());
-    this.freezeProtocolNegotiatorFactory = false;
-  }
-
-  NettyChannelBuilder(
-      SocketAddress address, ChannelCredentials channelCreds, CallCredentials callCreds,
-      ProtocolNegotiator.ClientFactory negotiator) {
-    managedChannelImplBuilder = new ManagedChannelImplBuilder(address,
-        getAuthorityFromAddress(address),
-        channelCreds, callCreds,
-        new NettyChannelTransportFactoryBuilder(),
-        new NettyChannelDefaultPortProvider());
-    this.protocolNegotiatorFactory = checkNotNull(negotiator, "negotiator");
-    this.freezeProtocolNegotiatorFactory = true;
+            getAuthorityFromAddress(address),
+            channelCreds, callCreds,
+            new NettyChannelTransportFactoryBuilder(),
+            new NettyChannelDefaultPortProvider());
+    this.clientBootstrapFactory = checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
   }
 
   @Internal
@@ -219,120 +152,6 @@ public final class NettyChannelBuilder extends
     } else {
       return address.toString();
     }
-  }
-
-  /**
-   * Specifies the channel type to use, by default we use {@code EpollSocketChannel} if available,
-   * otherwise using {@link NioSocketChannel}.
-   *
-   * <p>You either use this or {@link #channelFactory(ChannelFactory)} if your
-   * {@link Channel} implementation has no no-args constructor.
-   *
-   * <p>It's an optional parameter. If the user has not provided an Channel type or ChannelFactory
-   * when the channel is built, the builder will use the default one which is static.
-   *
-   * <p>You must also provide corresponding {@link #eventLoopGroup(EventLoopGroup)}. For example,
-   * {@link NioSocketChannel} must use {@link io.netty.channel.nio.NioEventLoopGroup}, otherwise
-   * your application won't start.
-   */
-  @CanIgnoreReturnValue
-  public NettyChannelBuilder channelType(Class<? extends Channel> channelType) {
-    checkNotNull(channelType, "channelType");
-    return channelFactory(new ReflectiveChannelFactory<>(channelType));
-  }
-
-  /**
-   * Specifies the {@link ChannelFactory} to create {@link Channel} instances. This method is
-   * usually only used if the specific {@code Channel} requires complex logic which requires
-   * additional information to create the {@code Channel}. Otherwise, recommend to use {@link
-   * #channelType(Class)}.
-   *
-   * <p>It's an optional parameter. If the user has not provided an Channel type or ChannelFactory
-   * when the channel is built, the builder will use the default one which is static.
-   *
-   * <p>You must also provide corresponding {@link #eventLoopGroup(EventLoopGroup)}. For example,
-   * {@link NioSocketChannel} based {@link ChannelFactory} must use {@link
-   * io.netty.channel.nio.NioEventLoopGroup}, otherwise your application won't start.
-   */
-  @CanIgnoreReturnValue
-  public NettyChannelBuilder channelFactory(ChannelFactory<? extends Channel> channelFactory) {
-    this.channelFactory = checkNotNull(channelFactory, "channelFactory");
-    return this;
-  }
-
-  /**
-   * Specifies a channel option. As the underlying channel as well as network implementation may
-   * ignore this value applications should consider it a hint.
-   */
-  @CanIgnoreReturnValue
-  public <T> NettyChannelBuilder withOption(ChannelOption<T> option, T value) {
-    channelOptions.put(option, value);
-    return this;
-  }
-
-  /**
-   * Sets the negotiation type for the HTTP/2 connection.
-   *
-   * <p>Default: <code>TLS</code>
-   */
-  @CanIgnoreReturnValue
-  public NettyChannelBuilder negotiationType(NegotiationType type) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ChannelCredentials");
-    if (!(protocolNegotiatorFactory instanceof DefaultProtocolNegotiator)) {
-      // Do nothing for compatibility
-      return this;
-    }
-    ((DefaultProtocolNegotiator) protocolNegotiatorFactory).negotiationType = type;
-    return this;
-  }
-
-  /**
-   * Provides an EventGroupLoop to be used by the netty transport.
-   *
-   * <p>It's an optional parameter. If the user has not provided an EventGroupLoop when the channel
-   * is built, the builder will use the default one which is static.
-   *
-   * <p>You must also provide corresponding {@link #channelType(Class)} or {@link
-   * #channelFactory(ChannelFactory)} corresponding to the given {@code EventLoopGroup}. For
-   * example, {@link io.netty.channel.nio.NioEventLoopGroup} requires {@link NioSocketChannel}
-   *
-   * <p>The channel won't take ownership of the given EventLoopGroup. It's caller's responsibility
-   * to shut it down when it's desired.
-   */
-  @CanIgnoreReturnValue
-  public NettyChannelBuilder eventLoopGroup(@Nullable EventLoopGroup eventLoopGroup) {
-    if (eventLoopGroup != null) {
-      return eventLoopGroupPool(new FixedObjectPool<>(eventLoopGroup));
-    }
-    return eventLoopGroupPool(DEFAULT_EVENT_LOOP_GROUP_POOL);
-  }
-
-  @CanIgnoreReturnValue
-  NettyChannelBuilder eventLoopGroupPool(ObjectPool<? extends EventLoopGroup> eventLoopGroupPool) {
-    this.eventLoopGroupPool = checkNotNull(eventLoopGroupPool, "eventLoopGroupPool");
-    return this;
-  }
-
-  /**
-   * SSL/TLS context to use instead of the system default. It must have been configured with {@link
-   * GrpcSslContexts}, but options could have been overridden.
-   */
-  @CanIgnoreReturnValue
-  public NettyChannelBuilder sslContext(SslContext sslContext) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ChannelCredentials");
-    if (sslContext != null) {
-      checkArgument(sslContext.isClient(),
-          "Server SSL context can not be used for client channel");
-      GrpcSslContexts.ensureAlpnAndH2Enabled(sslContext.applicationProtocolNegotiator());
-    }
-    if (!(protocolNegotiatorFactory instanceof DefaultProtocolNegotiator)) {
-      // Do nothing for compatibility
-      return this;
-    }
-    ((DefaultProtocolNegotiator) protocolNegotiatorFactory).sslContext = sslContext;
-    return this;
   }
 
   /**
@@ -398,26 +217,6 @@ public final class NettyChannelBuilder extends
   }
 
   /**
-   * Equivalent to using {@link #negotiationType(NegotiationType)} with {@code PLAINTEXT}.
-   */
-  @CanIgnoreReturnValue
-  @Override
-  public NettyChannelBuilder usePlaintext() {
-    negotiationType(NegotiationType.PLAINTEXT);
-    return this;
-  }
-
-  /**
-   * Equivalent to using {@link #negotiationType(NegotiationType)} with {@code TLS}.
-   */
-  @CanIgnoreReturnValue
-  @Override
-  public NettyChannelBuilder useTransportSecurity() {
-    negotiationType(NegotiationType.TLS);
-    return this;
-  }
-
-  /**
    * {@inheritDoc}
    *
    * @since 1.3.0
@@ -461,42 +260,6 @@ public final class NettyChannelBuilder extends
     return this;
   }
 
-
-  /**
-   * If non-{@code null}, attempts to create connections bound to a local port.
-   */
-  @CanIgnoreReturnValue
-  public NettyChannelBuilder localSocketPicker(@Nullable LocalSocketPicker localSocketPicker) {
-    this.localSocketPicker = localSocketPicker;
-    return this;
-  }
-
-  /**
-   * This class is meant to be overriden with a custom implementation of
-   * {@link #createSocketAddress}.  The default implementation is a no-op.
-   *
-   * @since 1.16.0
-   */
-  @ExperimentalApi("https://github.com/grpc/grpc-java/issues/4917")
-  public static class LocalSocketPicker {
-
-    /**
-     * Called by gRPC to pick local socket to bind to.  This may be called multiple times.
-     * Subclasses are expected to override this method.
-     *
-     * @param remoteAddress the remote address to connect to.
-     * @param attrs the Attributes present on the {@link EquivalentAddressGroup} associated
-     *        with the address.
-     * @return a {@link SocketAddress} suitable for binding, or else {@code null}.
-     * @since 1.16.0
-     */
-    @Nullable
-    public SocketAddress createSocketAddress(
-        SocketAddress remoteAddress, @EquivalentAddressGroup.Attr Attributes attrs) {
-      return null;
-    }
-  }
-
   /**
    * Sets the maximum message size allowed for a single gRPC frame. If an inbound messages larger
    * than this limit is received it will not be processed and the RPC will fail with
@@ -511,46 +274,11 @@ public final class NettyChannelBuilder extends
   }
 
   ClientTransportFactory buildTransportFactory() {
-    assertEventLoopAndChannelType();
-
-    ProtocolNegotiator negotiator = protocolNegotiatorFactory.newNegotiator();
     return new NettyTransportFactory(
-        negotiator, channelFactory, channelOptions,
-        eventLoopGroupPool, autoFlowControl, flowControlWindow, maxInboundMessageSize,
+        clientBootstrapFactory,
+        autoFlowControl, flowControlWindow, maxInboundMessageSize,
         maxHeaderListSize, keepAliveTimeNanos, keepAliveTimeoutNanos, keepAliveWithoutCalls,
-        transportTracerFactory, localSocketPicker, useGetForSafeMethods);
-  }
-
-  @VisibleForTesting
-  void assertEventLoopAndChannelType() {
-    boolean bothProvided = channelFactory != DEFAULT_CHANNEL_FACTORY
-        && eventLoopGroupPool != DEFAULT_EVENT_LOOP_GROUP_POOL;
-    boolean nonProvided = channelFactory == DEFAULT_CHANNEL_FACTORY
-        && eventLoopGroupPool == DEFAULT_EVENT_LOOP_GROUP_POOL;
-    checkState(
-        bothProvided || nonProvided,
-        "Both EventLoopGroup and ChannelType should be provided or neither should be");
-  }
-
-  int getDefaultPort() {
-    return protocolNegotiatorFactory.getDefaultPort();
-  }
-
-  @VisibleForTesting
-  static ProtocolNegotiator createProtocolNegotiatorByType(
-      NegotiationType negotiationType,
-      SslContext sslContext,
-      ObjectPool<? extends Executor> executorPool) {
-    switch (negotiationType) {
-      case PLAINTEXT:
-        return ProtocolNegotiators.plaintext();
-      case PLAINTEXT_UPGRADE:
-        return ProtocolNegotiators.plaintextUpgrade();
-      case TLS:
-        return ProtocolNegotiators.tls(sslContext, executorPool);
-      default:
-        throw new IllegalArgumentException("Unsupported negotiationType: " + negotiationType);
-    }
+        transportTracerFactory);
   }
 
   @CanIgnoreReturnValue
@@ -563,13 +291,6 @@ public final class NettyChannelBuilder extends
   NettyChannelBuilder enableCheckAuthority() {
     this.managedChannelImplBuilder.enableCheckAuthority();
     return this;
-  }
-
-  void protocolNegotiatorFactory(ProtocolNegotiator.ClientFactory protocolNegotiatorFactory) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ChannelCredentials");
-    this.protocolNegotiatorFactory
-        = checkNotNull(protocolNegotiatorFactory, "protocolNegotiatorFactory");
   }
 
   void setTracingEnabled(boolean value) {
@@ -603,47 +324,11 @@ public final class NettyChannelBuilder extends
     return this;
   }
 
-  private final class DefaultProtocolNegotiator implements ProtocolNegotiator.ClientFactory {
-    private NegotiationType negotiationType = NegotiationType.TLS;
-    private SslContext sslContext;
-
-    @Override
-    public ProtocolNegotiator newNegotiator() {
-      SslContext localSslContext = sslContext;
-      if (negotiationType == NegotiationType.TLS && localSslContext == null) {
-        try {
-          localSslContext = GrpcSslContexts.forClient().build();
-        } catch (SSLException ex) {
-          throw new RuntimeException(ex);
-        }
-      }
-      return createProtocolNegotiatorByType(negotiationType, localSslContext,
-          managedChannelImplBuilder.getOffloadExecutorPool());
-    }
-
-    @Override
-    public int getDefaultPort() {
-      switch (negotiationType) {
-        case PLAINTEXT:
-        case PLAINTEXT_UPGRADE:
-          return GrpcUtil.DEFAULT_PORT_PLAINTEXT;
-        case TLS:
-          return GrpcUtil.DEFAULT_PORT_SSL;
-        default:
-          throw new AssertionError(negotiationType + " not handled");
-      }
-    }
-  }
-
   /**
    * Creates Netty transports. Exposed for internal use, as it should be private.
    */
   private static final class NettyTransportFactory implements ClientTransportFactory {
-    private final ProtocolNegotiator protocolNegotiator;
-    private final ChannelFactory<? extends Channel> channelFactory;
-    private final Map<ChannelOption<?>, ?> channelOptions;
-    private final ObjectPool<? extends EventLoopGroup> groupPool;
-    private final EventLoopGroup group;
+    private final NettyClientBootstrapFactory clientBootstrapFactory;
     private final boolean autoFlowControl;
     private final int flowControlWindow;
     private final int maxMessageSize;
@@ -653,24 +338,15 @@ public final class NettyChannelBuilder extends
     private final long keepAliveTimeoutNanos;
     private final boolean keepAliveWithoutCalls;
     private final TransportTracer.Factory transportTracerFactory;
-    private final LocalSocketPicker localSocketPicker;
-    private final boolean useGetForSafeMethods;
 
     private boolean closed;
 
     NettyTransportFactory(
-        ProtocolNegotiator protocolNegotiator,
-        ChannelFactory<? extends Channel> channelFactory,
-        Map<ChannelOption<?>, ?> channelOptions, ObjectPool<? extends EventLoopGroup> groupPool,
+        NettyClientBootstrapFactory clientBootstrapFactory,
         boolean autoFlowControl, int flowControlWindow, int maxMessageSize, int maxHeaderListSize,
         long keepAliveTimeNanos, long keepAliveTimeoutNanos, boolean keepAliveWithoutCalls,
-        TransportTracer.Factory transportTracerFactory, LocalSocketPicker localSocketPicker,
-        boolean useGetForSafeMethods) {
-      this.protocolNegotiator = checkNotNull(protocolNegotiator, "protocolNegotiator");
-      this.channelFactory = channelFactory;
-      this.channelOptions = new HashMap<ChannelOption<?>, Object>(channelOptions);
-      this.groupPool = groupPool;
-      this.group = groupPool.getObject();
+        TransportTracer.Factory transportTracerFactory) {
+      this.clientBootstrapFactory = checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
       this.autoFlowControl = autoFlowControl;
       this.flowControlWindow = flowControlWindow;
       this.maxMessageSize = maxMessageSize;
@@ -680,26 +356,12 @@ public final class NettyChannelBuilder extends
       this.keepAliveTimeoutNanos = keepAliveTimeoutNanos;
       this.keepAliveWithoutCalls = keepAliveWithoutCalls;
       this.transportTracerFactory = transportTracerFactory;
-      this.localSocketPicker =
-          localSocketPicker != null ? localSocketPicker : new LocalSocketPicker();
-      this.useGetForSafeMethods = useGetForSafeMethods;
     }
 
     @Override
     public ConnectionClientTransport newClientTransport(
         SocketAddress serverAddress, ClientTransportOptions options, ChannelLogger channelLogger) {
       checkState(!closed, "The transport factory is closed.");
-
-      ProtocolNegotiator localNegotiator = protocolNegotiator;
-      HttpConnectProxiedSocketAddress proxiedAddr = options.getHttpConnectProxiedSocketAddress();
-      if (proxiedAddr != null) {
-        serverAddress = proxiedAddr.getTargetAddress();
-        localNegotiator = ProtocolNegotiators.httpProxy(
-            proxiedAddr.getProxyAddress(),
-            proxiedAddr.getUsername(),
-            proxiedAddr.getPassword(),
-            protocolNegotiator);
-      }
 
       final AtomicBackoff.State keepAliveTimeNanosState = keepAliveBackoff.getState();
       Runnable tooManyPingsRunnable = new Runnable() {
@@ -711,33 +373,25 @@ public final class NettyChannelBuilder extends
 
       // TODO(carl-mastrangelo): Pass channelLogger in.
       NettyClientTransport transport = new NettyClientTransport(
-          serverAddress, channelFactory, channelOptions, group,
-          localNegotiator, autoFlowControl, flowControlWindow,
-          maxMessageSize, maxHeaderListSize, keepAliveTimeNanosState.get(), keepAliveTimeoutNanos,
-          keepAliveWithoutCalls, options.getAuthority(), options.getUserAgent(),
+          serverAddress,
+          clientBootstrapFactory,
+          //  autoFlowControl, flowControlWindow,
+          maxMessageSize, keepAliveTimeNanosState.get(), keepAliveTimeoutNanos,
+          keepAliveWithoutCalls, options.getAuthority(),
           tooManyPingsRunnable, transportTracerFactory.create(), options.getEagAttributes(),
-          localSocketPicker, channelLogger, useGetForSafeMethods);
+          channelLogger);
       return transport;
     }
 
     @Override
     public ScheduledExecutorService getScheduledExecutorService() {
-      return group;
+      return clientBootstrapFactory.getGroup();
     }
 
     @Override
     public SwapChannelCredentialsResult swapChannelCredentials(ChannelCredentials channelCreds) {
       checkNotNull(channelCreds, "channelCreds");
-      FromChannelCredentialsResult result = ProtocolNegotiators.from(channelCreds);
-      if (result.error != null) {
-        return null;
-      }
-      ClientTransportFactory factory = new NettyTransportFactory(
-          result.negotiator.newNegotiator(), channelFactory, channelOptions, groupPool,
-          autoFlowControl, flowControlWindow, maxMessageSize, maxHeaderListSize, keepAliveTimeNanos,
-          keepAliveTimeoutNanos, keepAliveWithoutCalls, transportTracerFactory,  localSocketPicker,
-          useGetForSafeMethods);
-      return new SwapChannelCredentialsResult(factory, result.callCredentials);
+      throw new RuntimeException("NOT IMPLEMENTED");
     }
 
     @Override
@@ -746,9 +400,6 @@ public final class NettyChannelBuilder extends
         return;
       }
       closed = true;
-
-      protocolNegotiator.close();
-      groupPool.returnObject(group);
     }
   }
 }

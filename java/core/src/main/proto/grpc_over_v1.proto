@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package kr.jclab.grpcover.v1;
 
-option java_multiple_files = true;
+option java_multiple_files = false;
 option java_package = "kr.jclab.grpcover.core.protocol.v1";
-option java_outer_classname = "ProtocolV1Proto";
+option java_outer_classname = "GofProto";
 
 import "google/rpc/status.proto";
 
@@ -25,19 +25,25 @@ enum FrameFlags {
     END_STREAM = 1;
 }
 
+message Header {
+    google.rpc.Status status = 1;
+    repeated bytes metadata = 2;
+    string authority = 10;
+    string method = 11;
+    bytes additional_data = 21;
+}
+
 message Frame {
     FrameType type = 1;
     int32 stream_id = 2;
     repeated FrameFlags flag = 3;
 
-    string method_name = 10;
-    map<string, bytes> headers = 11;
-    string authority = 12;
-    repeated bytes metadata = 13;
-    int64 ping_data = 14;
+    Header header = 10;
+
+    int64 ping_data = 20;
 
     // for rst or go_away
-    int64 error_code = 20;
+    int64 error_code = 30;
 
-    bytes data = 30;
+    bytes data = 40;
 }

@@ -29,11 +29,11 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.EventLoop;
-import io.netty.handler.codec.http2.Http2Headers;
-import io.netty.handler.codec.http2.Http2Stream;
 import io.perfmark.Link;
 import io.perfmark.PerfMark;
 import io.perfmark.Tag;
+import kr.jclab.grpcover.core.protocol.v1.GofProto;
+import kr.jclab.grpcover.gofprotocol.GofStream;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -141,9 +141,9 @@ class NettyServerStream extends AbstractServerStream {
     public void writeTrailers(Metadata trailers, boolean headersSent, Status status) {
       PerfMark.startTask("NettyServerStream$Sink.writeTrailers");
       try {
-        Http2Headers http2Trailers = Utils.convertTrailers(trailers, headersSent);
+        GofProto.Header gofTrailers = Utils.convertTrailers(trailers, headersSent);
         writeQueue.enqueue(
-            SendResponseHeadersCommand.createTrailers(transportState(), http2Trailers, status),
+            SendResponseHeadersCommand.createTrailers(transportState(), gofTrailers, status),
             true);
       } finally {
         PerfMark.stopTask("NettyServerStream$Sink.writeTrailers");
@@ -164,7 +164,7 @@ class NettyServerStream extends AbstractServerStream {
   /** This should only be called from the transport thread. */
   public static class TransportState extends AbstractServerStream.TransportState
       implements StreamIdHolder {
-    private final Http2Stream http2Stream;
+    private final GofStream gofStream;
     private final NettyServerHandler handler;
     private final EventLoop eventLoop;
     private final Tag tag;
@@ -172,16 +172,16 @@ class NettyServerStream extends AbstractServerStream {
     public TransportState(
         NettyServerHandler handler,
         EventLoop eventLoop,
-        Http2Stream http2Stream,
+        GofStream gofStream,
         int maxMessageSize,
         StatsTraceContext statsTraceCtx,
         TransportTracer transportTracer,
         String methodName) {
       super(maxMessageSize, statsTraceCtx, transportTracer);
-      this.http2Stream = checkNotNull(http2Stream, "http2Stream");
+      this.gofStream = gofStream;
       this.handler = checkNotNull(handler, "handler");
       this.eventLoop = eventLoop;
-      this.tag = PerfMark.createTag(methodName, http2Stream.id());
+      this.tag = PerfMark.createTag(methodName, gofStream.id());
     }
 
     @Override
@@ -207,7 +207,7 @@ class NettyServerStream extends AbstractServerStream {
 
     @Override
     public void bytesRead(int processedBytes) {
-      handler.returnProcessedBytes(http2Stream, processedBytes);
+      // handler.returnProcessedBytes(http2Stream, processedBytes);
       handler.getWriteQueue().scheduleFlush();
     }
 
@@ -225,7 +225,7 @@ class NettyServerStream extends AbstractServerStream {
 
     @Override
     public int id() {
-      return http2Stream.id();
+      return gofStream.id();
     }
 
     @Override

@@ -25,18 +25,12 @@ import io.grpc.internal.InternalServer;
 import io.grpc.internal.*;
 import io.grpc.internal.ServerImplBuilder.ClientTransportServersBuilder;
 import io.netty.channel.*;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.ssl.SslContext;
+import io.netty.channel.Channel;
+import kr.jclab.grpcover.portable.GofChannelInitializer;
 
-import javax.net.ssl.SSLException;
-import java.io.File;
-import java.io.InputStream;
-import java.net.InetSocketAddress;
+import javax.annotation.Nullable;
 import java.net.SocketAddress;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Preconditions.*;
@@ -61,26 +55,14 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
   private static final long MIN_MAX_CONNECTION_IDLE_NANO = TimeUnit.SECONDS.toNanos(1L);
   private static final long MIN_MAX_CONNECTION_AGE_NANO = TimeUnit.SECONDS.toNanos(1L);
   private static final long AS_LARGE_AS_INFINITE = TimeUnit.DAYS.toNanos(1000L);
-  private static final ObjectPool<? extends EventLoopGroup> DEFAULT_BOSS_EVENT_LOOP_GROUP_POOL =
-      SharedResourcePool.forResource(Utils.DEFAULT_BOSS_EVENT_LOOP_GROUP);
-  private static final ObjectPool<? extends EventLoopGroup> DEFAULT_WORKER_EVENT_LOOP_GROUP_POOL =
-      SharedResourcePool.forResource(Utils.DEFAULT_WORKER_EVENT_LOOP_GROUP);
 
   private final ServerImplBuilder serverImplBuilder;
-  private final List<SocketAddress> listenAddresses = new ArrayList<>();
+  private final Channel parentChannel;
+  private final GofChannelInitializer channelInitializer;
 
   private TransportTracer.Factory transportTracerFactory = TransportTracer.getDefaultFactory();
-  private ChannelFactory<? extends ServerChannel> channelFactory =
-      Utils.DEFAULT_SERVER_CHANNEL_FACTORY;
-  private final Map<ChannelOption<?>, Object> channelOptions = new HashMap<>();
-  private final Map<ChannelOption<?>, Object> childChannelOptions = new HashMap<>();
-  private ObjectPool<? extends EventLoopGroup> bossEventLoopGroupPool =
-      DEFAULT_BOSS_EVENT_LOOP_GROUP_POOL;
-  private ObjectPool<? extends EventLoopGroup> workerEventLoopGroupPool =
-      DEFAULT_WORKER_EVENT_LOOP_GROUP_POOL;
+  private EventLoopGroup workerEventLoopGroup = null;
   private boolean forceHeapBuffer;
-  private ProtocolNegotiator.ServerFactory protocolNegotiatorFactory;
-  private final boolean freezeProtocolNegotiatorFactory;
   private int maxConcurrentCallsPerConnection = Integer.MAX_VALUE;
   private boolean autoFlowControl = true;
   private int flowControlWindow = DEFAULT_FLOW_CONTROL_WINDOW;
@@ -102,7 +84,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
    * @return the server builder.
    */
   public static NettyServerBuilder forPort(int port) {
-    return forAddress(new InetSocketAddress(port));
+    throw new RuntimeException("NOT SUPPORT");
   }
 
   /**
@@ -112,7 +94,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
    * @return the server builder.
    */
   public static NettyServerBuilder forPort(int port, ServerCredentials creds) {
-    return forAddress(new InetSocketAddress(port), creds);
+    throw new RuntimeException("NOT SUPPORT");
   }
 
   /**
@@ -122,7 +104,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
    * @return the server builder
    */
   public static NettyServerBuilder forAddress(SocketAddress address) {
-    return new NettyServerBuilder(address);
+    throw new RuntimeException("NOT SUPPORT");
   }
 
   /**
@@ -132,11 +114,11 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
    * @return the server builder
    */
   public static NettyServerBuilder forAddress(SocketAddress address, ServerCredentials creds) {
-    ProtocolNegotiators.FromServerCredentialsResult result = ProtocolNegotiators.from(creds);
-    if (result.error != null) {
-      throw new IllegalArgumentException(result.error);
-    }
-    return new NettyServerBuilder(address, result.negotiator);
+    throw new RuntimeException("NOT SUPPORT");
+  }
+
+  public static NettyServerBuilder forInitializer(EventLoopGroup workerEventLoopGroup, @Nullable Channel parentChannel, GofChannelInitializer initializer) {
+    return new NettyServerBuilder(workerEventLoopGroup, parentChannel, initializer);
   }
 
   private final class NettyClientTransportServersBuilder implements ClientTransportServersBuilder {
@@ -147,18 +129,11 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
     }
   }
 
-  private NettyServerBuilder(SocketAddress address) {
+  private NettyServerBuilder(EventLoopGroup workerEventLoopGroup, @Nullable Channel parentChannel, GofChannelInitializer initializer) {
     serverImplBuilder = new ServerImplBuilder(new NettyClientTransportServersBuilder());
-    this.listenAddresses.add(address);
-    this.protocolNegotiatorFactory = ProtocolNegotiators.serverPlaintextFactory();
-    this.freezeProtocolNegotiatorFactory = false;
-  }
-
-  NettyServerBuilder(SocketAddress address, ProtocolNegotiator.ServerFactory negotiatorFactory) {
-    serverImplBuilder = new ServerImplBuilder(new NettyClientTransportServersBuilder());
-    this.listenAddresses.add(address);
-    this.protocolNegotiatorFactory = checkNotNull(negotiatorFactory, "negotiatorFactory");
-    this.freezeProtocolNegotiatorFactory = true;
+    this.workerEventLoopGroup = workerEventLoopGroup;
+    this.parentChannel = parentChannel;
+    this.channelInitializer = initializer;
   }
 
   @Internal
@@ -168,195 +143,10 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
   }
 
   /**
-   * Adds an additional address for this server to listen on.  Callers must ensure that all socket
-   * addresses are compatible with the Netty channel type, and that they don't conflict with each
-   * other.
-   */
-  @CanIgnoreReturnValue
-  public NettyServerBuilder addListenAddress(SocketAddress listenAddress) {
-    this.listenAddresses.add(checkNotNull(listenAddress, "listenAddress"));
-    return this;
-  }
-
-  /**
-   * Specifies the channel type to use, by default we use {@code EpollServerSocketChannel} if
-   * available, otherwise using {@link NioServerSocketChannel}.
-   *
-   * <p>You either use this or {@link #channelFactory(ChannelFactory)} if your
-   * {@link ServerChannel} implementation has no no-args constructor.
-   *
-   * <p>It's an optional parameter. If the user has not provided an Channel type or ChannelFactory
-   * when the channel is built, the builder will use the default one which is static.
-   *
-   * <p>You must also provide corresponding {@link EventLoopGroup} using {@link
-   * #workerEventLoopGroup(EventLoopGroup)} and {@link #bossEventLoopGroup(EventLoopGroup)}. For
-   * example, {@link NioServerSocketChannel} must use {@link
-   * io.netty.channel.nio.NioEventLoopGroup}, otherwise your server won't start.
-   */
-  @CanIgnoreReturnValue
-  public NettyServerBuilder channelType(Class<? extends ServerChannel> channelType) {
-    checkNotNull(channelType, "channelType");
-    return channelFactory(new ReflectiveChannelFactory<>(channelType));
-  }
-
-  /**
-   * Specifies the {@link ChannelFactory} to create {@link ServerChannel} instances. This method is
-   * usually only used if the specific {@code ServerChannel} requires complex logic which requires
-   * additional information to create the {@code ServerChannel}. Otherwise, recommend to use {@link
-   * #channelType(Class)}.
-   *
-   * <p>It's an optional parameter. If the user has not provided an Channel type or ChannelFactory
-   * when the channel is built, the builder will use the default one which is static.
-   *
-   * <p>You must also provide corresponding {@link EventLoopGroup} using {@link
-   * #workerEventLoopGroup(EventLoopGroup)} and {@link #bossEventLoopGroup(EventLoopGroup)}. For
-   * example, if the factory creates {@link NioServerSocketChannel} you must use {@link
-   * io.netty.channel.nio.NioEventLoopGroup}, otherwise your server won't start.
-   */
-  @CanIgnoreReturnValue
-  public NettyServerBuilder channelFactory(ChannelFactory<? extends ServerChannel> channelFactory) {
-    this.channelFactory = checkNotNull(channelFactory, "channelFactory");
-    return this;
-  }
-
-  /**
-   * Specifies a channel option. As the underlying channel as well as network implementation may
-   * ignore this value applications should consider it a hint.
-   *
-   * @since 1.30.0
-   */
-  @CanIgnoreReturnValue
-  public <T> NettyServerBuilder withOption(ChannelOption<T> option, T value) {
-    this.channelOptions.put(option, value);
-    return this;
-  }
-
-  /**
-   * Specifies a child channel option. As the underlying channel as well as network implementation
-   * may ignore this value applications should consider it a hint.
-   *
-   * @since 1.9.0
-   */
-  @CanIgnoreReturnValue
-  public <T> NettyServerBuilder withChildOption(ChannelOption<T> option, T value) {
-    this.childChannelOptions.put(option, value);
-    return this;
-  }
-
-  /**
-   * Provides the boss EventGroupLoop to the server.
-   *
-   * <p>It's an optional parameter. If the user has not provided one when the server is built, the
-   * builder will use the default one which is static.
-   *
-   * <p>You must also provide corresponding {@link io.netty.channel.Channel} type using {@link
-   * #channelType(Class)} and {@link #workerEventLoopGroup(EventLoopGroup)}. For example, {@link
-   * NioServerSocketChannel} must use {@link io.netty.channel.nio.NioEventLoopGroup} for both boss
-   * and worker {@link EventLoopGroup}, otherwise your server won't start.
-   *
-   * <p>The server won't take ownership of the given EventLoopGroup. It's caller's responsibility
-   * to shut it down when it's desired.
-   *
-   * <p>Grpc uses non-daemon {@link Thread}s by default and thus a {@link io.grpc.Server} will
-   * continue to run even after the main thread has terminated. However, users have to be cautious
-   * when providing their own {@link EventLoopGroup}s.
-   * For example, Netty's {@link EventLoopGroup}s use daemon threads by default
-   * and thus an application with only daemon threads running besides the main thread will exit as
-   * soon as the main thread completes.
-   * A simple solution to this problem is to call {@link io.grpc.Server#awaitTermination()} to
-   * keep the main thread alive until the server has terminated.
-   */
-  @CanIgnoreReturnValue
-  public NettyServerBuilder bossEventLoopGroup(EventLoopGroup group) {
-    if (group != null) {
-      return bossEventLoopGroupPool(new FixedObjectPool<>(group));
-    }
-    return bossEventLoopGroupPool(DEFAULT_BOSS_EVENT_LOOP_GROUP_POOL);
-  }
-
-  @CanIgnoreReturnValue
-  NettyServerBuilder bossEventLoopGroupPool(
-      ObjectPool<? extends EventLoopGroup> bossEventLoopGroupPool) {
-    this.bossEventLoopGroupPool = checkNotNull(bossEventLoopGroupPool, "bossEventLoopGroupPool");
-    return this;
-  }
-
-  /**
-   * Provides the worker EventGroupLoop to the server.
-   *
-   * <p>It's an optional parameter. If the user has not provided one when the server is built, the
-   * builder will create one.
-   *
-   * <p>You must also provide corresponding {@link io.netty.channel.Channel} type using {@link
-   * #channelType(Class)} and {@link #bossEventLoopGroup(EventLoopGroup)}. For example, {@link
-   * NioServerSocketChannel} must use {@link io.netty.channel.nio.NioEventLoopGroup} for both boss
-   * and worker {@link EventLoopGroup}, otherwise your server won't start.
-   *
-   * <p>The server won't take ownership of the given EventLoopGroup. It's caller's responsibility
-   * to shut it down when it's desired.
-   *
-   * <p>Grpc uses non-daemon {@link Thread}s by default and thus a {@link io.grpc.Server} will
-   * continue to run even after the main thread has terminated. However, users have to be cautious
-   * when providing their own {@link EventLoopGroup}s.
-   * For example, Netty's {@link EventLoopGroup}s use daemon threads by default
-   * and thus an application with only daemon threads running besides the main thread will exit as
-   * soon as the main thread completes.
-   * A simple solution to this problem is to call {@link io.grpc.Server#awaitTermination()} to
-   * keep the main thread alive until the server has terminated.
-   */
-  @CanIgnoreReturnValue
-  public NettyServerBuilder workerEventLoopGroup(EventLoopGroup group) {
-    if (group != null) {
-      return workerEventLoopGroupPool(new FixedObjectPool<>(group));
-    }
-    return workerEventLoopGroupPool(DEFAULT_WORKER_EVENT_LOOP_GROUP_POOL);
-  }
-
-  @CanIgnoreReturnValue
-  NettyServerBuilder workerEventLoopGroupPool(
-      ObjectPool<? extends EventLoopGroup> workerEventLoopGroupPool) {
-    this.workerEventLoopGroupPool =
-        checkNotNull(workerEventLoopGroupPool, "workerEventLoopGroupPool");
-    return this;
-  }
-
-  /**
    * Force using heap buffer when custom allocator is enabled.
    */
   void setForceHeapBuffer(boolean value) {
     forceHeapBuffer = value;
-  }
-
-  /**
-   * Sets the TLS context to use for encryption. Providing a context enables encryption. It must
-   * have been configured with {@link GrpcSslContexts}, but options could have been overridden.
-   */
-  @CanIgnoreReturnValue
-  public NettyServerBuilder sslContext(SslContext sslContext) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ServerCredentials");
-    if (sslContext != null) {
-      checkArgument(sslContext.isServer(),
-          "Client SSL context can not be used for server");
-      GrpcSslContexts.ensureAlpnAndH2Enabled(sslContext.applicationProtocolNegotiator());
-      protocolNegotiatorFactory = ProtocolNegotiators.serverTlsFactory(sslContext);
-    } else {
-      protocolNegotiatorFactory = ProtocolNegotiators.serverPlaintextFactory();
-    }
-    return this;
-  }
-
-  /**
-   * Sets the {@link ProtocolNegotiator} to be used. Overrides the value specified in {@link
-   * #sslContext(SslContext)}.
-   */
-  @CanIgnoreReturnValue
-  @Internal
-  public final NettyServerBuilder protocolNegotiator(ProtocolNegotiator protocolNegotiator) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ServerCredentials");
-    this.protocolNegotiatorFactory = ProtocolNegotiators.fixedServerFactory(protocolNegotiator);
-    return this;
   }
 
   void setTracingEnabled(boolean value) {
@@ -484,7 +274,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
   @CanIgnoreReturnValue
   @Override
   public NettyServerBuilder keepAliveTime(long keepAliveTime, TimeUnit timeUnit) {
-    checkArgument(keepAliveTime > 0L, "keepalive time must be positive：%s", keepAliveTime);
+    checkArgument(keepAliveTime > 0L, "keepalive time must be positive: %s", keepAliveTime);
     keepAliveTimeInNanos = timeUnit.toNanos(keepAliveTime);
     keepAliveTimeInNanos = KeepAliveManager.clampKeepAliveTimeInNanos(keepAliveTimeInNanos);
     if (keepAliveTimeInNanos >= AS_LARGE_AS_INFINITE) {
@@ -631,14 +421,12 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
 
   NettyServer buildTransportServers(
       List<? extends ServerStreamTracer.Factory> streamTracerFactories) {
-    assertEventLoopsAndChannelType();
-
-    ProtocolNegotiator negotiator = protocolNegotiatorFactory.newNegotiator(
-        this.serverImplBuilder.getExecutorPool());
+    assertEventLoop();
 
     return new NettyServer(
-        listenAddresses, channelFactory, channelOptions, childChannelOptions,
-        bossEventLoopGroupPool, workerEventLoopGroupPool, forceHeapBuffer, negotiator,
+        parentChannel,
+        channelInitializer,
+        workerEventLoopGroup, forceHeapBuffer,
         streamTracerFactories, transportTracerFactory, maxConcurrentCallsPerConnection,
         autoFlowControl, flowControlWindow, maxMessageSize, maxHeaderListSize,
         keepAliveTimeInNanos, keepAliveTimeoutInNanos,
@@ -648,54 +436,13 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
   }
 
   @VisibleForTesting
-  void assertEventLoopsAndChannelType() {
-    boolean allProvided = channelFactory != Utils.DEFAULT_SERVER_CHANNEL_FACTORY
-        && bossEventLoopGroupPool != DEFAULT_BOSS_EVENT_LOOP_GROUP_POOL
-        && workerEventLoopGroupPool != DEFAULT_WORKER_EVENT_LOOP_GROUP_POOL;
-    boolean nonProvided = channelFactory == Utils.DEFAULT_SERVER_CHANNEL_FACTORY
-        && bossEventLoopGroupPool == DEFAULT_BOSS_EVENT_LOOP_GROUP_POOL
-        && workerEventLoopGroupPool == DEFAULT_WORKER_EVENT_LOOP_GROUP_POOL;
-    checkState(
-        allProvided || nonProvided,
-        "All of BossEventLoopGroup, WorkerEventLoopGroup and ChannelType should be provided or "
-            + "neither should be");
+  void assertEventLoop() {
+    checkNotNull(workerEventLoopGroup);
   }
 
   @CanIgnoreReturnValue
   NettyServerBuilder setTransportTracerFactory(TransportTracer.Factory transportTracerFactory) {
     this.transportTracerFactory = transportTracerFactory;
-    return this;
-  }
-
-  @CanIgnoreReturnValue
-  @Override
-  public NettyServerBuilder useTransportSecurity(File certChain, File privateKey) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ServerCredentials");
-    SslContext sslContext;
-    try {
-      sslContext = GrpcSslContexts.forServer(certChain, privateKey).build();
-    } catch (SSLException e) {
-      // This should likely be some other, easier to catch exception.
-      throw new RuntimeException(e);
-    }
-    protocolNegotiatorFactory = ProtocolNegotiators.serverTlsFactory(sslContext);
-    return this;
-  }
-
-  @CanIgnoreReturnValue
-  @Override
-  public NettyServerBuilder useTransportSecurity(InputStream certChain, InputStream privateKey) {
-    checkState(!freezeProtocolNegotiatorFactory,
-               "Cannot change security when using ServerCredentials");
-    SslContext sslContext;
-    try {
-      sslContext = GrpcSslContexts.forServer(certChain, privateKey).build();
-    } catch (SSLException e) {
-      // This should likely be some other, easier to catch exception.
-      throw new RuntimeException(e);
-    }
-    protocolNegotiatorFactory = ProtocolNegotiators.serverTlsFactory(sslContext);
     return this;
   }
 }
