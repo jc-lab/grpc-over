@@ -112,7 +112,8 @@ public class AbstractClientStreamTest {
   @Test
   public void cancel_doNotAcceptOk() {
     for (Code code : Code.values()) {
-      ClientStreamListener listener = new NoopClientStreamListener();
+      ClientStreamListener listener = new
+              it add NoopClientStreamListener();
       AbstractClientStream stream =
           new BaseAbstractClientStream(allocator, statsTraceCtx, transportTracer);
       stream.start(listener);
@@ -345,7 +346,7 @@ public class AbstractClientStreamTest {
     ArgumentCaptor<Status> statusCaptor = ArgumentCaptor.forClass(Status.class);
     verify(mockListener)
         .closed(statusCaptor.capture(), any(RpcProgress.class), any(Metadata.class));
-    assertSame(Code.INTERNAL, statusCaptor.getValue().getCode());
+    assertSame(Status.Code.INTERNAL, statusCaptor.getValue().getCode());
     assertEquals("rst___stream", statusCaptor.getValue().getDescription());
   }
 
@@ -380,7 +381,7 @@ public class AbstractClientStreamTest {
     ArgumentCaptor<Status> statusCaptor = ArgumentCaptor.forClass(Status.class);
     verify(mockListener)
         .closed(statusCaptor.capture(), any(RpcProgress.class), any(Metadata.class));
-    assertSame(Code.INTERNAL, statusCaptor.getValue().getCode());
+    assertSame(Status.Code.INTERNAL, statusCaptor.getValue().getCode());
     assertEquals("Encountered end-of-stream mid-frame", statusCaptor.getValue().getDescription());
   }
 
@@ -398,7 +399,7 @@ public class AbstractClientStreamTest {
     ArgumentCaptor<Status> statusCaptor = ArgumentCaptor.forClass(Status.class);
     verify(mockListener)
         .closed(statusCaptor.capture(), any(RpcProgress.class), any(Metadata.class));
-    assertSame(Code.DATA_LOSS, statusCaptor.getValue().getCode());
+    assertSame(Status.Code.DATA_LOSS, statusCaptor.getValue().getCode());
     assertEquals("data___loss", statusCaptor.getValue().getDescription());
   }
 
@@ -559,7 +560,7 @@ public class AbstractClientStreamTest {
     public void cancel(Status reason) {}
   }
 
-  private static class BaseTransportState extends TransportState {
+  private static class BaseTransportState extends AbstractClientStream.TransportState {
     private Throwable deframeFailedCause;
 
     private Throwable getDeframeFailedCause() {
