@@ -101,7 +101,7 @@ public interface GofConnection {
 
         /**
          * Indicates whether or not this endpoint may have created the given stream. This is {@code true} if
-         * {@link #isValidStreamId(int)} and {@code streamId} <= {@link #lastStreamCreated()}.
+         * {@link #isValidStreamId(int)} and {@code streamId} &lt;= {@link #lastStreamCreated()}.
          */
         boolean mayHaveCreatedStream(int streamId);
 
