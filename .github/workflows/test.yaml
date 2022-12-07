@@ -16,3 +16,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
       - run: (cd java && chmod +x ./gradlew && ./gradlew :core:build :core:test)
+      - name: Archive build files
+        uses: actions/upload-artifact@v3
+        with:
+          name: java-build
+          path: |
+            java/build
+            java/core
