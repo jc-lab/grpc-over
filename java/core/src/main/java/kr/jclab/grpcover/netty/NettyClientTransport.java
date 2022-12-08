@@ -186,7 +186,7 @@ class NettyClientTransport implements ConnectionClientTransport {
     ProtocolNegotiators.WaitUntilActiveHandler waitUntilActiveHandler = new ProtocolNegotiators.WaitUntilActiveHandler(negotiationHandler, handler.getNegotiationLogger());
     ChannelHandler bufferingHandler = new WriteBufferingAndExceptionHandler(clientBootstrapFactory.channelInitializer());
 
-    Channel channel = clientBootstrapFactory.createChannel();
+    Channel channel = clientBootstrapFactory.createChannel(bufferingHandler);
     if (channel == null) {
       Bootstrap b = clientBootstrapFactory.bootstrap();
       b.option(ALLOCATOR, Utils.getByteBufAllocator(false));
@@ -207,6 +207,7 @@ class NettyClientTransport implements ConnectionClientTransport {
        */
       ChannelFuture regFuture = b.register();
       if (regFuture.isDone() && !regFuture.isSuccess()) {
+        this.channel = null;
         // Initialization has failed badly. All new streams should be made to fail.
         Throwable t = regFuture.cause();
         if (t == null) {
@@ -228,6 +229,7 @@ class NettyClientTransport implements ConnectionClientTransport {
       }
       channel = regFuture.channel();
     }
+    this.channel = channel;
 
     // Start the write queue as soon as the channel is constructed
     handler.startWriteQueue(channel);

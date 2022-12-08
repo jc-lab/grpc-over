@@ -11,7 +11,7 @@ public interface NettyClientBootstrapFactory {
     /**
      * If returns null, use {@link #bootstrap}
      */
-    default Channel createChannel() {
+    default Channel createChannel(ChannelHandler handler) {
         return null;
     }
     Bootstrap bootstrap();
