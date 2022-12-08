@@ -102,7 +102,7 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             groupId = group
-            artifactId = 'core'
+            artifactId = 'websocket'
             from components.java
 //            versionMapping {
 //                usage('java-api') {
