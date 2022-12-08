@@ -186,46 +186,49 @@ class NettyClientTransport implements ConnectionClientTransport {
     ProtocolNegotiators.WaitUntilActiveHandler waitUntilActiveHandler = new ProtocolNegotiators.WaitUntilActiveHandler(negotiationHandler, handler.getNegotiationLogger());
     ChannelHandler bufferingHandler = new WriteBufferingAndExceptionHandler(clientBootstrapFactory.channelInitializer());
 
-    Bootstrap b = clientBootstrapFactory.bootstrap();
-    b.option(ALLOCATOR, Utils.getByteBufAllocator(false));
-    b.attr(NettyChannelBuilder.GRPC_CHANNEL_HANDLER, waitUntilActiveHandler);
-    if (target != null) {
-      b.attr(NettyChannelBuilder.GRPC_TARGET, target);
-    }
-
-    // For non-socket based channel, the option will be ignored.
-    b.option(SO_KEEPALIVE, true);
-
-    b.handler(bufferingHandler);
-
-    /*
-     * We don't use a ChannelInitializer in the client bootstrap because its "initChannel" method
-     * is executed in the event loop and we need this handler to be in the pipeline immediately so
-     * that it may begin buffering writes.
-     */
-    ChannelFuture regFuture = b.register();
-    if (regFuture.isDone() && !regFuture.isSuccess()) {
-      channel = null;
-      // Initialization has failed badly. All new streams should be made to fail.
-      Throwable t = regFuture.cause();
-      if (t == null) {
-        t = new IllegalStateException("Channel is null, but future doesn't have a cause");
+    Channel channel = clientBootstrapFactory.createChannel();
+    if (channel == null) {
+      Bootstrap b = clientBootstrapFactory.bootstrap();
+      b.option(ALLOCATOR, Utils.getByteBufAllocator(false));
+      b.attr(NettyChannelBuilder.GRPC_CHANNEL_HANDLER, waitUntilActiveHandler);
+      if (target != null) {
+        b.attr(NettyChannelBuilder.GRPC_TARGET, target);
       }
-      statusExplainingWhyTheChannelIsNull = Utils.statusFromThrowable(t);
-      // Use a Runnable since lifecycleManager calls transportListener
-      return new Runnable() {
-        @Override
-        public void run() {
-          // NOTICE: we not are calling lifecycleManager from the event loop. But there isn't really
-          // an event loop in this case, so nothing should be accessing the lifecycleManager. We
-          // could use GlobalEventExecutor (which is what regFuture would use for notifying
-          // listeners in this case), but avoiding on-demand thread creation in an error case seems
-          // a good idea and is probably clearer threading.
-          lifecycleManager.notifyTerminated(statusExplainingWhyTheChannelIsNull);
+
+      // For non-socket based channel, the option will be ignored.
+      b.option(SO_KEEPALIVE, true);
+
+      b.handler(bufferingHandler);
+
+      /*
+       * We don't use a ChannelInitializer in the client bootstrap because its "initChannel" method
+       * is executed in the event loop and we need this handler to be in the pipeline immediately so
+       * that it may begin buffering writes.
+       */
+      ChannelFuture regFuture = b.register();
+      if (regFuture.isDone() && !regFuture.isSuccess()) {
+        // Initialization has failed badly. All new streams should be made to fail.
+        Throwable t = regFuture.cause();
+        if (t == null) {
+          t = new IllegalStateException("Channel is null, but future doesn't have a cause");
         }
-      };
+        statusExplainingWhyTheChannelIsNull = Utils.statusFromThrowable(t);
+        // Use a Runnable since lifecycleManager calls transportListener
+        return new Runnable() {
+          @Override
+          public void run() {
+            // NOTICE: we not are calling lifecycleManager from the event loop. But there isn't really
+            // an event loop in this case, so nothing should be accessing the lifecycleManager. We
+            // could use GlobalEventExecutor (which is what regFuture would use for notifying
+            // listeners in this case), but avoiding on-demand thread creation in an error case seems
+            // a good idea and is probably clearer threading.
+            lifecycleManager.notifyTerminated(statusExplainingWhyTheChannelIsNull);
+          }
+        };
+      }
+      channel = regFuture.channel();
     }
-    channel = regFuture.channel();
+
     // Start the write queue as soon as the channel is constructed
     handler.startWriteQueue(channel);
     // This write will have no effect, yet it will only complete once the negotiationHandler
