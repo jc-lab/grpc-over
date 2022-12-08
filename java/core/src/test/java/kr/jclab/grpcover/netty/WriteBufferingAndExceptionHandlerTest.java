@@ -82,7 +82,7 @@ public class WriteBufferingAndExceptionHandlerTest {
     cf.sync();
     // Write before connect.  In the event connect fails, the pipeline is torn down and the handler
     // won't be able to fail the writes with the correct exception.
-    ChannelFuture wf = chan.writeAndFlush(new Object());
+    ChannelFuture wf = chan.writeAndFlush(NettyClientHandler.NOOP_MESSAGE);
     chan.connect(new LocalAddress("bogus"));
 
     try {
@@ -114,7 +114,7 @@ public class WriteBufferingAndExceptionHandlerTest {
     server = sf.channel();
     sf.sync();
 
-    ChannelFuture wf = chan.writeAndFlush(new Object());
+    ChannelFuture wf = chan.writeAndFlush(NettyClientHandler.NOOP_MESSAGE);
     chan.connect(addr);
     chan.pipeline().fireChannelInactive();
 
@@ -149,7 +149,7 @@ public class WriteBufferingAndExceptionHandlerTest {
     server = sf.channel();
     sf.sync();
 
-    ChannelFuture wf = chan.writeAndFlush(new Object());
+    ChannelFuture wf = chan.writeAndFlush(NettyClientHandler.NOOP_MESSAGE);
     chan.connect(addr);
     chan.close();
 
@@ -184,7 +184,7 @@ public class WriteBufferingAndExceptionHandlerTest {
     server = sf.channel();
     sf.sync();
 
-    ChannelFuture wf = chan.writeAndFlush(new Object());
+    ChannelFuture wf = chan.writeAndFlush(NettyClientHandler.NOOP_MESSAGE);
     chan.connect(addr);
     chan.pipeline().fireExceptionCaught(Status.ABORTED.withDescription("zap").asRuntimeException());
 
@@ -259,7 +259,7 @@ public class WriteBufferingAndExceptionHandlerTest {
     sf.sync();
 
     chan.connect(addr);
-    ChannelFuture wf = chan.writeAndFlush(new Object());
+    ChannelFuture wf = chan.writeAndFlush(NettyClientHandler.NOOP_MESSAGE);
     chan.pipeline().removeFirst();
 
     try {
@@ -315,7 +315,7 @@ public class WriteBufferingAndExceptionHandlerTest {
 
     assertTrue(handlerAdded.get());
 
-    chan.write(new Object());
+    chan.write(NettyClientHandler.NOOP_MESSAGE);
     chan.connect(addr).sync();
     assertNull(write.get());
 
@@ -357,7 +357,7 @@ public class WriteBufferingAndExceptionHandlerTest {
     server = sf.channel();
     sf.sync();
 
-    ChannelFuture wf = chan.writeAndFlush(new Object());
+    ChannelFuture wf = chan.writeAndFlush(NettyClientHandler.NOOP_MESSAGE);
     chan.connect(addr);
     chan.pipeline().fireChannelRead(Unpooled.copiedBuffer(new byte[] {'a'}));
 

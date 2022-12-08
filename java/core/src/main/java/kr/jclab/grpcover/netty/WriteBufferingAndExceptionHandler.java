@@ -187,8 +187,8 @@ final class WriteBufferingAndExceptionHandler extends ChannelDuplexHandler {
   public void flush(ChannelHandlerContext ctx) throws Exception {
     if (!writing) {
       super.flush(ctx);
-      return ;
     }
+
     /*
      * Swallowing any flushes is not only an optimization but also required
      * for the SslHandler to work correctly. If the SslHandler receives multiple
