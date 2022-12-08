@@ -48,6 +48,7 @@ class NettyClientTransport implements ConnectionClientTransport {
 
   private final InternalLogId logId;
   private final SocketAddress remoteAddress;
+  private final String target;
   private final NettyClientBootstrapFactory clientBootstrapFactory;
   private final String authority;
   private final int maxMessageSize;
@@ -71,6 +72,7 @@ class NettyClientTransport implements ConnectionClientTransport {
 
   NettyClientTransport(
       SocketAddress address,
+      String target,
       NettyClientBootstrapFactory clientBootstrapFactory,
       int maxMessageSize,
       long keepAliveTimeNanos, long keepAliveTimeoutNanos,
@@ -78,6 +80,7 @@ class NettyClientTransport implements ConnectionClientTransport {
       Runnable tooManyPingsRunnable, TransportTracer transportTracer, Attributes eagAttributes,
       ChannelLogger channelLogger) {
     this.remoteAddress = Preconditions.checkNotNull(address, "address");
+    this.target = target;
     this.clientBootstrapFactory = Preconditions.checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
     this.maxMessageSize = maxMessageSize;
     this.keepAliveTimeNanos = keepAliveTimeNanos;
@@ -186,6 +189,9 @@ class NettyClientTransport implements ConnectionClientTransport {
     Bootstrap b = clientBootstrapFactory.bootstrap();
     b.option(ALLOCATOR, Utils.getByteBufAllocator(false));
     b.attr(NettyChannelBuilder.GRPC_CHANNEL_HANDLER, waitUntilActiveHandler);
+    if (target != null) {
+      b.attr(NettyChannelBuilder.GRPC_TARGET, target);
+    }
 
     // For non-socket based channel, the option will be ignored.
     b.option(SO_KEEPALIVE, true);

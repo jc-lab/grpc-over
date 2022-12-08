@@ -30,8 +30,11 @@ import kr.jclab.grpcover.portable.NettyClientBootstrapFactory;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import static com.google.common.base.Preconditions.*;
 import static io.grpc.internal.GrpcUtil.DEFAULT_KEEPALIVE_TIMEOUT_NANOS;
@@ -45,6 +48,7 @@ import static io.grpc.internal.GrpcUtil.KEEPALIVE_TIME_NANOS_DISABLED;
 public final class NettyChannelBuilder extends
     AbstractManagedChannelImplBuilder<NettyChannelBuilder> {
   public static AttributeKey<ChannelHandler> GRPC_CHANNEL_HANDLER = AttributeKey.valueOf("GRPC_CHANNEL_HANDLER");
+  public static AttributeKey<String> GRPC_TARGET = AttributeKey.valueOf("GRPC_TARGET");
 
 
   // 1MiB.
@@ -65,6 +69,7 @@ public final class NettyChannelBuilder extends
   private final ManagedChannelImplBuilder managedChannelImplBuilder;
   private TransportTracer.Factory transportTracerFactory = TransportTracer.getDefaultFactory();
   private NettyClientBootstrapFactory clientBootstrapFactory;
+  private String target;
   private boolean autoFlowControl = DEFAULT_AUTO_FLOW_CONTROL;
   private int flowControlWindow = DEFAULT_FLOW_CONTROL_WINDOW;
   private int maxHeaderListSize = GrpcUtil.DEFAULT_MAX_HEADER_LIST_SIZE;
@@ -121,18 +126,24 @@ public final class NettyChannelBuilder extends
   NettyChannelBuilder(
           NettyClientBootstrapFactory clientBootstrapFactory,
           String target, ChannelCredentials channelCreds, CallCredentials callCreds) {
-    managedChannelImplBuilder = new ManagedChannelImplBuilder(target,
+    String authority = getAuthorityFromUri(URI.create(target));
+    managedChannelImplBuilder = new ManagedChannelImplBuilder(
+            authority,
             channelCreds, callCreds,
             new NettyChannelTransportFactoryBuilder(),
-            new NettyChannelDefaultPortProvider());
+            null
+    );
+    this.target = target;
     this.clientBootstrapFactory = checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
   }
 
   NettyChannelBuilder(
           NettyClientBootstrapFactory clientBootstrapFactory,
-          SocketAddress address, ChannelCredentials channelCreds, CallCredentials callCreds) {
+          SocketAddress address, ChannelCredentials channelCreds, CallCredentials callCreds
+  ) {
+    String authority = getAuthorityFromAddress(address);
     managedChannelImplBuilder = new ManagedChannelImplBuilder(address,
-            getAuthorityFromAddress(address),
+            authority,
             channelCreds, callCreds,
             new NettyChannelTransportFactoryBuilder(),
             new NettyChannelDefaultPortProvider());
@@ -143,6 +154,14 @@ public final class NettyChannelBuilder extends
   @Override
   protected ManagedChannelBuilder<?> delegate() {
     return managedChannelImplBuilder;
+  }
+
+  private static String getAuthorityFromUri(URI endpointUri) {
+    try {
+      return new URI(null, null, endpointUri.getHost(), endpointUri.getPort(), null, null, null).getAuthority();
+    } catch (URISyntaxException ex) {
+      throw new IllegalArgumentException("Invalid host or port: " + endpointUri.getHost() + " " + endpointUri.getPort(), ex);
+    }
   }
 
   private static String getAuthorityFromAddress(SocketAddress address) {
@@ -275,7 +294,7 @@ public final class NettyChannelBuilder extends
 
   ClientTransportFactory buildTransportFactory() {
     return new NettyTransportFactory(
-        clientBootstrapFactory,
+        clientBootstrapFactory, target,
         autoFlowControl, flowControlWindow, maxInboundMessageSize,
         maxHeaderListSize, keepAliveTimeNanos, keepAliveTimeoutNanos, keepAliveWithoutCalls,
         transportTracerFactory);
@@ -329,6 +348,7 @@ public final class NettyChannelBuilder extends
    */
   private static final class NettyTransportFactory implements ClientTransportFactory {
     private final NettyClientBootstrapFactory clientBootstrapFactory;
+    private final String target;
     private final boolean autoFlowControl;
     private final int flowControlWindow;
     private final int maxMessageSize;
@@ -343,10 +363,12 @@ public final class NettyChannelBuilder extends
 
     NettyTransportFactory(
         NettyClientBootstrapFactory clientBootstrapFactory,
+        String target,
         boolean autoFlowControl, int flowControlWindow, int maxMessageSize, int maxHeaderListSize,
         long keepAliveTimeNanos, long keepAliveTimeoutNanos, boolean keepAliveWithoutCalls,
         TransportTracer.Factory transportTracerFactory) {
       this.clientBootstrapFactory = checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
+      this.target = target;
       this.autoFlowControl = autoFlowControl;
       this.flowControlWindow = flowControlWindow;
       this.maxMessageSize = maxMessageSize;
@@ -374,6 +396,7 @@ public final class NettyChannelBuilder extends
       // TODO(carl-mastrangelo): Pass channelLogger in.
       NettyClientTransport transport = new NettyClientTransport(
           serverAddress,
+          target,
           clientBootstrapFactory,
           //  autoFlowControl, flowControlWindow,
           maxMessageSize, keepAliveTimeNanosState.get(), keepAliveTimeoutNanos,

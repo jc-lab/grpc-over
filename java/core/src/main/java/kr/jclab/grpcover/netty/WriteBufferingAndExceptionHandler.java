@@ -120,6 +120,11 @@ final class WriteBufferingAndExceptionHandler extends ChannelDuplexHandler {
       promise.setFailure(failCause);
       ReferenceCountUtil.release(msg);
     } else {
+      if (msg != NettyClientHandler.NOOP_MESSAGE && !(msg instanceof WriteQueue.QueuedCommand)) {
+        ctx.write(msg, promise);
+        return ;
+      }
+
       // Do not special case GracefulServerCloseCommand, as we don't want to cause handshake
       // failures.
       if (msg instanceof GracefulCloseCommand || msg instanceof ForcefulCloseCommand) {
@@ -179,7 +184,11 @@ final class WriteBufferingAndExceptionHandler extends ChannelDuplexHandler {
    * {@link #writeBufferedAndRemove(ChannelHandlerContext)}.
    */
   @Override
-  public void flush(ChannelHandlerContext ctx) {
+  public void flush(ChannelHandlerContext ctx) throws Exception {
+    if (!writing) {
+      super.flush(ctx);
+      return ;
+    }
     /*
      * Swallowing any flushes is not only an optimization but also required
      * for the SslHandler to work correctly. If the SslHandler receives multiple

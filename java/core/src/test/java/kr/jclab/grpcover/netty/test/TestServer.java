@@ -11,7 +11,7 @@ import io.netty.handler.codec.protobuf.ProtobufVarint32FrameDecoder;
 import io.netty.handler.codec.protobuf.ProtobufVarint32LengthFieldPrepender;
 import kr.jclab.grpcover.core.protocol.v1.GofProto;
 import kr.jclab.grpcover.portable.GofChannelInitializer;
-import kr.jclab.grpcover.netty.ServerHandlerBuilder;
+import kr.jclab.grpcover.netty.ServerChannelSetupHandler;
 import org.jetbrains.annotations.NotNull;
 
 import java.net.InetSocketAddress;
@@ -45,7 +45,7 @@ public class TestServer {
 
     public static class Initializer extends ChannelInitializer<NioSocketChannel> implements GofChannelInitializer {
         private final Logger logger = Logger.getLogger(Initializer.class.getName());
-        private final CompletableFuture<ServerHandlerBuilder> serverHandlerBuilderCompletableFuture = new CompletableFuture<>();
+        private final CompletableFuture<ServerChannelSetupHandler> serverHandlerBuilderCompletableFuture = new CompletableFuture<>();
 
         @Override
         protected void initChannel(@NotNull NioSocketChannel ch) throws Exception {
@@ -55,12 +55,12 @@ public class TestServer {
                     new ProtobufVarint32FrameDecoder(),
                     new ProtobufDecoder(GofProto.Frame.getDefaultInstance())
             );
-            serverHandlerBuilderCompletableFuture.get().build(ch);
+            serverHandlerBuilderCompletableFuture.get().setup(ch);
         }
 
         @Override
-        public void attachGofServerHandlerBuilder(ServerHandlerBuilder serverHandlerBuilder) {
-            serverHandlerBuilderCompletableFuture.complete(serverHandlerBuilder);
+        public void attachGofServerChannelSetupHandler(ServerChannelSetupHandler serverChannelSetupHandler) {
+            serverHandlerBuilderCompletableFuture.complete(serverChannelSetupHandler);
         }
     }
 }

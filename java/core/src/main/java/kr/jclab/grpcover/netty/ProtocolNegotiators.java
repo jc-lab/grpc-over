@@ -86,6 +86,7 @@ public final class ProtocolNegotiators {
         }
     }
 
+
     /**
      * ProtocolNegotiationHandler is a convenience handler that makes it easy to follow the rules for
      * protocol negotiation.  Handlers should strongly consider extending this handler.

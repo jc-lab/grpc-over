@@ -99,11 +99,6 @@ class NettyClientHandler extends AbstractNettyHandler {
     return this.decoder;
   }
 
-  @Override
-  public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-    super.handlerAdded(ctx);
-  }
-
   @lombok.Builder
   private NettyClientHandler(
       ChannelLogger negotiationLogger,
@@ -758,9 +753,24 @@ class NettyClientHandler extends AbstractNettyHandler {
     return stream;
   }
 
+  private void transportReady() {
+    if (!lifecycleManager.isTransportReady()) {
+      lifecycleManager.notifyReady();
+    }
+  }
+
+  @Override
+  public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+    super.handlerAdded(ctx);
+    if (ctx.channel().isActive()) {
+      transportReady();
+    }
+  }
+
   @Override
   public void channelActive(@NotNull ChannelHandlerContext ctx) throws Exception {
-    lifecycleManager.notifyReady();
+    transportReady();
+    super.channelActive(ctx);
   }
 
   private final DefaultGofFrameWriter gofFrameWriter;

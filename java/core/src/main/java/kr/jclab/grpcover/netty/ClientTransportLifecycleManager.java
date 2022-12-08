@@ -44,6 +44,10 @@ final class ClientTransportLifecycleManager {
     listener.transportReady();
   }
 
+  public boolean isTransportReady() {
+    return transportReady;
+  }
+
   /**
    * Marks transport as shutdown, but does not set the error status. This must eventually be
    * followed by a call to notifyShutdown.

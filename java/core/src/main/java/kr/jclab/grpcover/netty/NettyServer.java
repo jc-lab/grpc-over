@@ -141,52 +141,49 @@ class NettyServer implements InternalServer, InternalWithLogId {
   public void start(ServerListener serverListener) throws IOException {
     listener = checkNotNull(serverListener, "serverListener");
 
-    channelInitializer.attachGofServerHandlerBuilder(new ServerHandlerBuilder() {
-      @Override
-      public void build(Channel ch) {
-        ChannelPromise channelDone = ch.newPromise();
+    channelInitializer.attachGofServerChannelSetupHandler(ch -> {
+      ChannelPromise channelDone = ch.newPromise();
 
-        long maxConnectionAgeInNanos = NettyServer.this.maxConnectionAgeInNanos;
-        if (maxConnectionAgeInNanos != NettyServerBuilder.MAX_CONNECTION_AGE_NANOS_DISABLED) {
-          // apply a random jitter of +/-10% to max connection age
-          maxConnectionAgeInNanos =
-                  (long) ((.9D + Math.random() * .2D) * maxConnectionAgeInNanos);
-        }
-
-        NettyServerTransport transport =
-                new NettyServerTransport(
-                        ch,
-                        channelDone,
-                        streamTracerFactories,
-                        transportTracerFactory.create(),
-                        maxStreamsPerConnection,
-                        autoFlowControl,
-                        flowControlWindow,
-                        maxMessageSize,
-                        maxHeaderListSize,
-                        keepAliveTimeInNanos,
-                        keepAliveTimeoutInNanos,
-                        maxConnectionIdleInNanos,
-                        maxConnectionAgeInNanos,
-                        maxConnectionAgeGraceInNanos,
-                        permitKeepAliveWithoutCalls,
-                        permitKeepAliveTimeInNanos,
-                        eagAttributes);
-        ServerTransportListener transportListener;
-        // This is to order callbacks on the listener, not to guard access to channel.
-        synchronized (NettyServer.this) {
-          if (terminated) {
-            // Server already terminated.
-            ch.close();
-            return;
-          }
-          // `channel` shutdown can race with `ch` initialization, so this is only safe to increment
-          // inside the lock.
-          transportListener = listener.transportCreated(transport);
-        }
-
-        transport.start(transportListener);
+      long maxConnectionAgeInNanos = NettyServer.this.maxConnectionAgeInNanos;
+      if (maxConnectionAgeInNanos != NettyServerBuilder.MAX_CONNECTION_AGE_NANOS_DISABLED) {
+        // apply a random jitter of +/-10% to max connection age
+        maxConnectionAgeInNanos =
+                (long) ((.9D + Math.random() * .2D) * maxConnectionAgeInNanos);
       }
+
+      NettyServerTransport transport =
+              new NettyServerTransport(
+                      ch,
+                      channelDone,
+                      streamTracerFactories,
+                      transportTracerFactory.create(),
+                      maxStreamsPerConnection,
+                      autoFlowControl,
+                      flowControlWindow,
+                      maxMessageSize,
+                      maxHeaderListSize,
+                      keepAliveTimeInNanos,
+                      keepAliveTimeoutInNanos,
+                      maxConnectionIdleInNanos,
+                      maxConnectionAgeInNanos,
+                      maxConnectionAgeGraceInNanos,
+                      permitKeepAliveWithoutCalls,
+                      permitKeepAliveTimeInNanos,
+                      eagAttributes);
+      ServerTransportListener transportListener;
+      // This is to order callbacks on the listener, not to guard access to channel.
+      synchronized (NettyServer.this) {
+        if (terminated) {
+          // Server already terminated.
+          ch.close();
+          return;
+        }
+        // `channel` shutdown can race with `ch` initialization, so this is only safe to increment
+        // inside the lock.
+        transportListener = listener.transportCreated(transport);
+      }
+
+      transport.start(transportListener);
     });
 
     final List<InternalInstrumented<SocketStats>> socketStats = new ArrayList<>();

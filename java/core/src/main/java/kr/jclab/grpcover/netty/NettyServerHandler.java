@@ -524,12 +524,17 @@ class NettyServerHandler extends AbstractNettyHandler {
 
   private boolean started = false;
 
-  @Override
-  public void channelActive(ChannelHandlerContext ctx) throws Exception {
-    if (!started) {
+  private void checkNegotiationAndTransportReady() {
+    if (!started && negotiationAttributes != null) {
       started = true;
       attributes = transportListener.transportReady(negotiationAttributes);
     }
+  }
+
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) throws Exception {
+    checkNegotiationAndTransportReady();
+    super.channelActive(ctx);
   }
 
   @Override
@@ -537,6 +542,8 @@ class NettyServerHandler extends AbstractNettyHandler {
     this.negotiationAttributes = attrs;
     this.securityInfo = securityInfo;
     NettyClientHandler.writeBufferingAndRemove(ctx().channel());
+
+    checkNegotiationAndTransportReady();
   }
 
   private final DefaultGofFrameWriter gofFrameWriter;
