@@ -28,12 +28,14 @@ import io.grpc.internal.KeepAliveManager.ClientKeepAlivePinger;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.*;
+import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import kr.jclab.grpcover.portable.NettyClientBootstrapFactory;
 
 import java.net.SocketAddress;
 import java.nio.channels.ClosedChannelException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
@@ -69,6 +71,7 @@ class NettyClientTransport implements ConnectionClientTransport {
   private final TransportTracer transportTracer;
   private final Attributes eagAttributes;
   private final ChannelLogger channelLogger;
+  private final HashMap<AttributeKey<?>, Object> channelAttributes;
 
   NettyClientTransport(
       SocketAddress address,
@@ -78,7 +81,8 @@ class NettyClientTransport implements ConnectionClientTransport {
       long keepAliveTimeNanos, long keepAliveTimeoutNanos,
       boolean keepAliveWithoutCalls, String authority,
       Runnable tooManyPingsRunnable, TransportTracer transportTracer, Attributes eagAttributes,
-      ChannelLogger channelLogger) {
+      ChannelLogger channelLogger,
+      HashMap<AttributeKey<?>, Object> channelAttributes) {
     this.remoteAddress = Preconditions.checkNotNull(address, "address");
     this.target = target;
     this.clientBootstrapFactory = Preconditions.checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
@@ -93,6 +97,7 @@ class NettyClientTransport implements ConnectionClientTransport {
     this.eagAttributes = Preconditions.checkNotNull(eagAttributes, "eagAttributes");
     this.logId = InternalLogId.allocate(getClass(), remoteAddress.toString());
     this.channelLogger = Preconditions.checkNotNull(channelLogger, "channelLogger");
+    this.channelAttributes = Preconditions.checkNotNull(channelAttributes, "channelAttributes");
   }
 
   @Override
@@ -190,6 +195,9 @@ class NettyClientTransport implements ConnectionClientTransport {
     if (channel == null) {
       Bootstrap b = clientBootstrapFactory.bootstrap();
       b.option(ALLOCATOR, Utils.getByteBufAllocator(false));
+
+      this.channelAttributes.forEach((key, value) -> b.attr((AttributeKey) key, value));
+
       b.attr(NettyChannelBuilder.GRPC_CHANNEL_HANDLER, waitUntilActiveHandler);
       if (target != null) {
         b.attr(NettyChannelBuilder.GRPC_TARGET, target);

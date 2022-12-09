@@ -9,6 +9,7 @@ import io.netty.handler.codec.protobuf.ProtobufDecoder;
 import io.netty.handler.codec.protobuf.ProtobufEncoder;
 import io.netty.handler.codec.protobuf.ProtobufVarint32FrameDecoder;
 import io.netty.handler.codec.protobuf.ProtobufVarint32LengthFieldPrepender;
+import io.netty.handler.ssl.SslContext;
 import kr.jclab.grpcover.core.protocol.v1.GofProto;
 import kr.jclab.grpcover.portable.GofChannelInitializer;
 import kr.jclab.grpcover.netty.ServerChannelSetupHandler;
@@ -27,9 +28,9 @@ public class TestServer {
         this.serverChannel = serverChannel;
     }
 
-    public static TestServer newServer(TestHelper testHelper, int port) {
+    public static TestServer newServer(TestHelper testHelper, int port, SslContext sslContext) {
         try {
-            Initializer initializer = new Initializer();
+            Initializer initializer = new Initializer(sslContext);
             Channel serverChannel = new ServerBootstrap()
                     .group(testHelper.boss, testHelper.worker)
                     .channel(NioServerSocketChannel.class)
@@ -43,13 +44,27 @@ public class TestServer {
         }
     }
 
+    public static TestServer newServer(TestHelper testHelper, int port) {
+        return newServer(testHelper, port, null);
+    }
+
     public static class Initializer extends ChannelInitializer<NioSocketChannel> implements GofChannelInitializer {
         private final Logger logger = Logger.getLogger(Initializer.class.getName());
         private final CompletableFuture<ServerChannelSetupHandler> serverHandlerBuilderCompletableFuture = new CompletableFuture<>();
 
+        private final SslContext sslContext;
+
+        public Initializer(SslContext sslContext) {
+            this.sslContext = sslContext;
+        }
+
         @Override
         protected void initChannel(@NotNull NioSocketChannel ch) throws Exception {
+            if (sslContext != null) {
+                ch.pipeline().addLast(sslContext.newHandler(ch.alloc()));
+            }
             ch.pipeline().addLast(
+                    new TestNegotiationHandler(sslContext),
                     new ProtobufVarint32LengthFieldPrepender(),
                     new ProtobufEncoder(),
                     new ProtobufVarint32FrameDecoder(),

@@ -44,6 +44,7 @@ final class WriteBufferingAndExceptionHandler extends ChannelDuplexHandler {
   private final ChannelHandler next;
   private boolean writing;
   private boolean flushRequested;
+  private boolean mayNeedFlush;
   private Throwable failCause;
 
   WriteBufferingAndExceptionHandler(ChannelHandler next) {
@@ -121,6 +122,7 @@ final class WriteBufferingAndExceptionHandler extends ChannelDuplexHandler {
       ReferenceCountUtil.release(msg);
     } else {
       if (msg != NettyClientHandler.NOOP_MESSAGE && !(msg instanceof WriteQueue.QueuedCommand)) {
+        mayNeedFlush = true;
         ctx.write(msg, promise);
         return ;
       }
@@ -185,8 +187,9 @@ final class WriteBufferingAndExceptionHandler extends ChannelDuplexHandler {
    */
   @Override
   public void flush(ChannelHandlerContext ctx) throws Exception {
-    if (!writing) {
+    if (mayNeedFlush && !writing) {
       super.flush(ctx);
+      mayNeedFlush = false;
     }
 
     /*

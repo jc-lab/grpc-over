@@ -32,6 +32,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.HashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -76,6 +77,8 @@ public final class NettyChannelBuilder extends
   private long keepAliveTimeNanos = KEEPALIVE_TIME_NANOS_DISABLED;
   private long keepAliveTimeoutNanos = DEFAULT_KEEPALIVE_TIMEOUT_NANOS;
   private boolean keepAliveWithoutCalls;
+
+  private final HashMap<AttributeKey<?>, Object> channelAttributes = new HashMap<>();
 
   public static NettyChannelBuilder forTarget(
           NettyClientBootstrapFactory clientBootstrapFactory,
@@ -297,7 +300,7 @@ public final class NettyChannelBuilder extends
         clientBootstrapFactory, target,
         autoFlowControl, flowControlWindow, maxInboundMessageSize,
         maxHeaderListSize, keepAliveTimeNanos, keepAliveTimeoutNanos, keepAliveWithoutCalls,
-        transportTracerFactory);
+        transportTracerFactory, channelAttributes);
   }
 
   @CanIgnoreReturnValue
@@ -309,6 +312,12 @@ public final class NettyChannelBuilder extends
   @CanIgnoreReturnValue
   NettyChannelBuilder enableCheckAuthority() {
     this.managedChannelImplBuilder.enableCheckAuthority();
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  <T> NettyChannelBuilder channelAttribute(AttributeKey<T> key, T value) {
+    this.channelAttributes.put(key, value);
     return this;
   }
 
@@ -358,6 +367,7 @@ public final class NettyChannelBuilder extends
     private final long keepAliveTimeoutNanos;
     private final boolean keepAliveWithoutCalls;
     private final TransportTracer.Factory transportTracerFactory;
+    private final HashMap<AttributeKey<?>, Object> channelAttributes;
 
     private boolean closed;
 
@@ -366,7 +376,8 @@ public final class NettyChannelBuilder extends
         String target,
         boolean autoFlowControl, int flowControlWindow, int maxMessageSize, int maxHeaderListSize,
         long keepAliveTimeNanos, long keepAliveTimeoutNanos, boolean keepAliveWithoutCalls,
-        TransportTracer.Factory transportTracerFactory) {
+        TransportTracer.Factory transportTracerFactory,
+        HashMap<AttributeKey<?>, Object> channelAttributes) {
       this.clientBootstrapFactory = checkNotNull(clientBootstrapFactory, "clientBootstrapFactory");
       this.target = target;
       this.autoFlowControl = autoFlowControl;
@@ -378,6 +389,7 @@ public final class NettyChannelBuilder extends
       this.keepAliveTimeoutNanos = keepAliveTimeoutNanos;
       this.keepAliveWithoutCalls = keepAliveWithoutCalls;
       this.transportTracerFactory = transportTracerFactory;
+      this.channelAttributes = channelAttributes;
     }
 
     @Override
@@ -402,7 +414,8 @@ public final class NettyChannelBuilder extends
           maxMessageSize, keepAliveTimeNanosState.get(), keepAliveTimeoutNanos,
           keepAliveWithoutCalls, options.getAuthority(),
           tooManyPingsRunnable, transportTracerFactory.create(), options.getEagAttributes(),
-          channelLogger);
+          channelLogger,
+          channelAttributes);
       return transport;
     }
 
