@@ -46,6 +46,7 @@ public class NettyGofFrameWriter implements FrameWriter {
                 .setErrorCode(errorCode);
         if (debugData != null && debugData.readableBytes() > 0) {
             builder.setData(ByteString.copyFrom(debugData.nioBuffer()));
+            debugData.release();
         }
         return ctx.write(builder.build(), promise);
     }
@@ -60,6 +61,7 @@ public class NettyGofFrameWriter implements FrameWriter {
         }
         if (data != null && data.readableBytes() > 0) {
             builder.setData(ByteString.copyFrom(data.nioBuffer()));
+            data.release();
         }
         return ctx.write(builder.build(), promise);
     }
