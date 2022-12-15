@@ -66,6 +66,16 @@ abstract class AbstractNettyHandler extends GofConnectionHandler implements GofC
   }
 
   @Override
+  public void channelInactive(@NotNull ChannelHandlerContext ctx) throws Exception {
+    // Call super class first, as this may result in decode being called.
+    super.channelInactive(ctx);
+
+    // We need to remove all streams (not just the active ones).
+    // See https://github.com/netty/netty/issues/4838.
+    connection().close(ctx.voidPromise());
+  }
+
+  @Override
   public void channelRead(@NotNull ChannelHandlerContext ctx, @NotNull Object msg) throws Exception {
     if (msg instanceof GofProto.Frame) {
       GofProto.Frame frame = (GofProto.Frame) msg;

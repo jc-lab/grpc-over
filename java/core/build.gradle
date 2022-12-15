@@ -14,6 +14,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'signing'
+    id 'jacoco'
 }
 
 apply plugin: 'com.google.protobuf'
@@ -72,6 +73,7 @@ test {
     useJUnitPlatform {
         includeEngines 'junit-vintage'
     }
+    finalizedBy jacocoTestReport
 }
 
 protobuf {
