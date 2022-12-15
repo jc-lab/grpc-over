@@ -44,11 +44,11 @@ abstract class AbstractNettyHandler extends GofConnectionHandler implements GofC
   protected abstract DefaultGofDecoder decoder();
 
   public AbstractNettyHandler(
-          boolean server,
+          GofConnection connection,
           int maxStreams,
           ChannelLogger negotiationLogger
   ) {
-    this.connection = new DefaultGofConnection(server);
+    this.connection = connection;
     this.connection.remote().maxActiveStreams(maxStreams);
     this.connection.local().maxActiveStreams(maxStreams);
     this.negotiationLogger = negotiationLogger;

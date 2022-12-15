@@ -68,7 +68,7 @@ public abstract class GofConnectionHandler extends ChannelDuplexHandler implemen
 //      return;
 //    }
         promise = promise.unvoid();
-        // Avoid NotYetConnectedException and avoid sending before connection preface
+        // Avoid NotYetConnectedException
         if (!ctx.channel().isActive()) {
             ctx.close(promise);
             return;

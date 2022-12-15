@@ -99,8 +99,10 @@ class NettyClientHandler extends AbstractNettyHandler {
     return this.decoder;
   }
 
-  @lombok.Builder
+  @lombok.Builder(builderClassName = "Builder")
   private NettyClientHandler(
+      GofConnection connection,
+      FrameWriter frameWriter,
       ChannelLogger negotiationLogger,
       ClientTransportLifecycleManager lifecycleManager,
       KeepAliveManager keepAliveManager,
@@ -110,7 +112,7 @@ class NettyClientHandler extends AbstractNettyHandler {
       Attributes eagAttributes,
       String authority
   ) {
-    super(false, Integer.MAX_VALUE - 3, negotiationLogger);
+    super(connection, Integer.MAX_VALUE - 3, negotiationLogger);
 
     Preconditions.checkNotNull(lifecycleManager, "lifecycleManager");
     Preconditions.checkNotNull(stopwatchFactory, "stopwatchFactory");
@@ -129,9 +131,9 @@ class NettyClientHandler extends AbstractNettyHandler {
 
     streamKey = connection().newKey();
 
-    gofFrameWriter = new DefaultGofFrameWriter(connection());
-    pingCounter = new PingCountingFrameWriter(gofFrameWriter);
-    decoder = new DefaultGofDecoder(connection(), gofFrameWriter);
+    this.gofFrameWriter = frameWriter;
+    pingCounter = new PingCountingFrameWriter(frameWriter);
+    decoder = new DefaultGofDecoder(connection(), this.gofFrameWriter);
     decoder.setFrameHandler(frameHandler);
     decoder.setLifecycleManager(this);
 
@@ -170,6 +172,29 @@ class NettyClientHandler extends AbstractNettyHandler {
         }
       }
     });
+  }
+
+  public static class Builder {
+    public NettyClientHandler build() {
+      if (connection == null) {
+        connection = new DefaultGofConnection(false);
+      }
+      if (frameWriter == null) {
+        frameWriter = new DefaultGofFrameWriter(connection);
+      }
+      return new NettyClientHandler(
+              connection,
+              frameWriter,
+              negotiationLogger,
+              lifecycleManager,
+              keepAliveManager,
+              stopwatchFactory,
+              tooManyPingsRunnable,
+              transportTracer,
+              eagAttributes,
+              authority
+      );
+    }
   }
 
   /**
@@ -773,7 +798,7 @@ class NettyClientHandler extends AbstractNettyHandler {
     super.channelActive(ctx);
   }
 
-  private final DefaultGofFrameWriter gofFrameWriter;
+  private final FrameWriter gofFrameWriter;
   private final FrameWriter pingCounter;
   @Override
   protected FrameWriter frameWriter() {

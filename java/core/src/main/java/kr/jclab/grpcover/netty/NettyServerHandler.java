@@ -81,12 +81,14 @@ class NettyServerHandler extends AbstractNettyHandler {
     return this.decoder;
   }
 
-  @lombok.Builder
-  private NettyServerHandler(
+  @lombok.Builder(builderClassName = "Builder")
+  NettyServerHandler(
       ChannelPromise channelUnused,
+      GofConnection connection,
       ServerTransportListener transportListener,
       List<? extends ServerStreamTracer.Factory> streamTracerFactories,
       TransportTracer transportTracer,
+      FrameWriter frameWriter,
       int maxStreams,
       int maxMessageSize,
       long keepAliveTimeInNanos,
@@ -97,7 +99,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       boolean permitKeepAliveWithoutCalls,
       long permitKeepAliveTimeInNanos
   ) {
-    super(true, maxStreams, new ServerChannelLogger());
+    super(connection, maxStreams, new ServerChannelLogger());
 
     KeepAliveEnforcer keepAliveEnforcer = new KeepAliveEnforcer(
             permitKeepAliveWithoutCalls, permitKeepAliveTimeInNanos, TimeUnit.NANOSECONDS);
@@ -109,8 +111,8 @@ class NettyServerHandler extends AbstractNettyHandler {
       maxConnectionIdleManager = new MaxConnectionIdleManager(maxConnectionIdleInNanos);
     }
 
-    gofFrameWriter = new DefaultGofFrameWriter(connection());
-    decoder = new DefaultGofDecoder(connection(), gofFrameWriter);
+    this.frameWriter = new WriteMonitoringFrameWriter(frameWriter, keepAliveEnforcer);
+    decoder = new DefaultGofDecoder(connection(), frameWriter);
     decoder.setFrameHandler(frameHandler);
     decoder.setLifecycleManager(this);
 
@@ -149,6 +151,34 @@ class NettyServerHandler extends AbstractNettyHandler {
     this.transportListener = checkNotNull(transportListener, "transportListener");
     this.streamTracerFactories = checkNotNull(streamTracerFactories, "streamTracerFactories");
     this.transportTracer = checkNotNull(transportTracer, "transportTracer");
+  }
+
+  public static class Builder {
+    public NettyServerHandler build() {
+      if (connection == null) {
+        connection = new DefaultGofConnection(true);
+      }
+      if (frameWriter == null) {
+        frameWriter = new DefaultGofFrameWriter(connection);
+      }
+      return new NettyServerHandler(
+              channelUnused,
+              connection,
+              transportListener,
+              streamTracerFactories,
+              transportTracer,
+              frameWriter,
+              maxStreams,
+              maxMessageSize,
+              keepAliveTimeInNanos,
+              keepAliveTimeoutInNanos,
+              maxConnectionIdleInNanos,
+              maxConnectionAgeInNanos,
+              maxConnectionAgeGraceInNanos,
+              permitKeepAliveWithoutCalls,
+              permitKeepAliveTimeInNanos
+      );
+    }
   }
 
   @Nullable
@@ -546,10 +576,10 @@ class NettyServerHandler extends AbstractNettyHandler {
     checkNegotiationAndTransportReady();
   }
 
-  private final DefaultGofFrameWriter gofFrameWriter;
+  private final FrameWriter frameWriter;
   @Override
   protected FrameWriter frameWriter() {
-    return gofFrameWriter;
+    return frameWriter;
   }
 
   private final FrameHandler frameHandler = new FrameHandler() {
@@ -747,6 +777,29 @@ class NettyServerHandler extends AbstractNettyHandler {
         return -1L;
       }
       return TimeUnit.NANOSECONDS.toMillis(graceTimeInNanos);
+    }
+  }
+
+  // Use a frame writer so that we know when frames are through flow control and actually being
+  // written.
+  private static class WriteMonitoringFrameWriter extends FrameWriterDecorator {
+    private final KeepAliveEnforcer keepAliveEnforcer;
+
+    public WriteMonitoringFrameWriter(FrameWriter delegate, KeepAliveEnforcer keepAliveEnforcer) {
+      super(delegate);
+      this.keepAliveEnforcer = keepAliveEnforcer;
+    }
+
+    @Override
+    public ChannelFuture writeHeaders(ChannelHandlerContext ctx, int streamId, GofProto.Header headers, boolean endStream, ChannelPromise promise) {
+      keepAliveEnforcer.resetCounters();
+      return super.writeHeaders(ctx, streamId, headers, endStream, promise);
+    }
+
+    @Override
+    public ChannelFuture writeData(ChannelHandlerContext ctx, int streamId, ByteBuf data, boolean endStream, ChannelPromise promise) {
+      keepAliveEnforcer.resetCounters();
+      return super.writeData(ctx, streamId, data, endStream, promise);
     }
   }
 
