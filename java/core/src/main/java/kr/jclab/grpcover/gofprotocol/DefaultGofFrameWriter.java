@@ -7,12 +7,22 @@ import io.netty.channel.ChannelPromise;
 import kr.jclab.grpcover.core.protocol.v1.GofProto;
 import kr.jclab.grpcover.netty.NettyGofFrameWriter;
 
-public class DefaultGofFrameWriter implements FrameWriter {
+public class DefaultGofFrameWriter implements FrameWriter, FrameSizePolicy {
     private final GofConnection gofConnection;
-    private final FrameWriter frameWriter = new NettyGofFrameWriter();;
+    private final NettyGofFrameWriter frameWriter = new NettyGofFrameWriter();
 
     public DefaultGofFrameWriter(GofConnection gofConnection) {
         this.gofConnection = gofConnection;
+    }
+
+    @Override
+    public void maxFrameSize(int max) throws GofException {
+        this.frameWriter.maxFrameSize(max);
+    }
+
+    @Override
+    public int maxFrameSize() {
+        return this.frameWriter.maxFrameSize();
     }
 
     @Override
