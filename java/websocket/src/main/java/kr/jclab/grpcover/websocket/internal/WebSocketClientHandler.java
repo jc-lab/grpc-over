@@ -45,7 +45,7 @@ public class WebSocketClientHandler extends WebSocketNegotiationHandler {
 
     @Override
     public void channelInactive(final ChannelHandlerContext ctx) throws Exception {
-        //System.out.println("WebSocket Client disconnected!");
+        super.channelInactive(ctx);
     }
 
     @Override
