@@ -42,8 +42,7 @@ public class GrpcOverWebsocketClientChannelInitializer extends ChannelInitialize
                         null,
                         false,
                         new DefaultHttpHeaders()
-                ),
-                grpcChannelHandler
+                )
         );
 
         if (sslHandler != null) {

@@ -18,17 +18,14 @@ public class WebSocketClientHandler extends WebSocketNegotiationHandler {
     private final SslHandler sslHandler;
     private final WebSocketClientHandshaker handshaker;
     private ChannelPromise handshakeFuture;
-    private final ChannelHandler nextHandler;
 
     public WebSocketClientHandler(
             SslHandler sslHandler,
-            WebSocketClientHandshaker handshaker,
-            ChannelHandler nextHandler
+            WebSocketClientHandshaker handshaker
     ) {
         super(sslHandler);
         this.sslHandler = sslHandler;
         this.handshaker = handshaker;
-        this.nextHandler = nextHandler;
     }
 
     public ChannelFuture handshakeFuture() {
