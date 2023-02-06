@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group 'kr.jclab.grpcover'
-    version '0.0.1-rc10'
+    version '0.0.1-rc11'
 
     repositories {
         mavenCentral()
