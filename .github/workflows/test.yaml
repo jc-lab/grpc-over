@@ -6,20 +6,5 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: sudo apt-get update && sudo apt-get install -y openjdk-11-jdk-headless
-      - name: Gradle Caching
-        uses: actions/cache@v3
-        with:
-          path: |  
-              ~/.gradle/caches
-              ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-      - run: (cd java && chmod +x ./gradlew && ./gradlew :core:build :core:test)
-      - name: Archive build files
-        uses: actions/upload-artifact@v3
-        with:
-          name: java-build
-          path: |
-            java/build
-            java/core
+      - run: (chmod +x ./gradlew && ./gradlew build)
+

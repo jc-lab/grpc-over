@@ -1,9 +1,0 @@
-rootProject.name = 'parent'
-
-gradle.ext.projectGrpcVersion = '1.51.1'
-gradle.ext.projectProtobufVersion = '3.19.4'
-gradle.ext.nettyVersion = '4.1.85.Final'
-
-include 'testing-proto'
-include 'core'
-include 'websocket'
