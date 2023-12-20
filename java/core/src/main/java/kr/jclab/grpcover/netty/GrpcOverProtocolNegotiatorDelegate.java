@@ -1,6 +1,5 @@
-package kr.jclab.grpcover;
+package kr.jclab.grpcover.netty;
 
-import io.grpc.netty.GrpcHttp2ConnectionHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.util.AsciiString;
 

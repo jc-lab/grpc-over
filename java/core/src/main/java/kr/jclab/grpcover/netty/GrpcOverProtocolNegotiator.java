@@ -1,8 +1,7 @@
-package io.grpc.netty;
+package kr.jclab.grpcover.netty;
 
 import io.netty.channel.ChannelHandler;
 import io.netty.util.AsciiString;
-import kr.jclab.grpcover.GrpcOverProtocolNegotiatorDelegate;
 
 public class GrpcOverProtocolNegotiator implements ProtocolNegotiator {
     private final GrpcOverProtocolNegotiatorDelegate delegate;
