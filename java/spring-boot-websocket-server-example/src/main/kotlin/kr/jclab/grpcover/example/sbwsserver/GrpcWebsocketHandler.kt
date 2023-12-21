@@ -16,6 +16,7 @@ class GrpcWebsocketHandler(
         )
         session.attributes["grpcChannel"] = channel
         grpcServerChannel.registerChildChannel(channel)
+        channel.registerFuture.get()
     }
 
     override fun handleTransportError(session: WebSocketSession, exception: Throwable) {

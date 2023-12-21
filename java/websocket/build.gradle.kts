@@ -55,8 +55,8 @@ dependencies {
     api("io.netty:netty-codec:${Version.NETTY}")
     api("io.netty:netty-common:${Version.NETTY}")
     api("io.netty:netty-handler:${Version.NETTY}")
-    api("io.netty:netty-codec-http:${Version.NETTY}")
-    api("io.netty:netty-codec-http2:${Version.NETTY}")
+
+    api(project(":core"))
 }
 
 tasks.getByName<Test>("test") {
@@ -98,7 +98,7 @@ publishing {
 
             pom {
                 name.set(project.name)
-                description.set("GRPC over Anything")
+                description.set("GRPC over WebSocket")
                 url.set("https://github.com/jc-lab/grpc-over")
                 licenses {
                     license {

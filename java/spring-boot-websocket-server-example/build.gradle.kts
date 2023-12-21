@@ -39,6 +39,7 @@ dependencies {
     implementation("io.netty:netty-codec:${nettyVersion}")
     implementation("io.netty:netty-common:${nettyVersion}")
     implementation("io.netty:netty-handler:${nettyVersion}")
+    implementation("io.netty:netty-codec-http:${nettyVersion}")
     implementation("io.netty:netty-codec-http2:${nettyVersion}")
     implementation("com.google.protobuf:protobuf-java:${projectProtobufVersion}")
     implementation("io.grpc:grpc-protobuf:${projectGrpcVersion}")
@@ -47,6 +48,7 @@ dependencies {
     implementation("io.grpc:grpc-netty:${projectGrpcVersion}")
 
     implementation(project(":core"))
+    implementation(project(":websocket"))
 }
 
 tasks.withType<KotlinCompile> {

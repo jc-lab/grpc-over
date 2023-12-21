@@ -15,6 +15,7 @@ class WrappedWebSocketChannel(
     private val webSocketSession: WebSocketSession,
 ) : AbstractPseudoChannel(parent, DefaultChannelId.newInstance()) {
     private val log = LoggerFactory.getLogger(this::class.java)
+    val registerFuture = this.newPromise()
 
     private enum class State {
         OPEN, ACTIVE, INACTIVE, CLOSED
@@ -35,6 +36,7 @@ class WrappedWebSocketChannel(
     override fun doRegister() {
         super.doRegister()
         state = State.ACTIVE
+        registerFuture.setSuccess()
     }
 
     protected fun deactivate() {

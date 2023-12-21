@@ -1,6 +1,6 @@
 rootProject.name = "parent"
 
 include("core")
-//include("websocket")
+include("websocket")
 include("spring-boot-websocket-server-example")
 

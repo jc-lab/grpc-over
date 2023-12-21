@@ -1,12 +1,12 @@
 package kr.jclab.grpcover.example.sbwsserver
 
-import io.grpc.netty.GrpcHttp2ConnectionHandler
-import io.grpc.netty.GrpcOverProtocolNegotiator
-import io.grpc.netty.NettyServerBuilder
 import io.netty.channel.ChannelHandler
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.util.AsciiString
-import kr.jclab.grpcover.GrpcOverProtocolNegotiatorDelegate
+import kr.jclab.grpcover.netty.NettyServerBuilder
+import kr.jclab.grpcover.ImmediatelyGrpcNegotiationHandler
+import kr.jclab.grpcover.netty.GrpcOverProtocolNegotiator
+import kr.jclab.grpcover.netty.GrpcOverProtocolNegotiatorDelegate
 import kr.jclab.netty.pseudochannel.DefaultPseudoSocketAddress
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -31,6 +31,21 @@ class GrpcServerConfig {
     ): GrpcServerChannel {
         val addr = DefaultPseudoSocketAddress()
         val channel = GrpcServerChannel()
+        val negotiator = GrpcOverProtocolNegotiator(object :
+            GrpcOverProtocolNegotiatorDelegate {
+            override fun scheme(): AsciiString {
+                return AsciiString("ws")
+            }
+
+            override fun newHandler(grpcHandler: ChannelHandler): ChannelHandler {
+                return ImmediatelyGrpcNegotiationHandler(grpcHandler)
+            }
+
+            override fun close() {
+                println("close GrpcOverProtocolNegotiatorDelegate")
+            }
+        })
+
         val server = NettyServerBuilder
             .forAddress(addr)
             .bossEventLoopGroup(bossGroup)
@@ -38,20 +53,8 @@ class GrpcServerConfig {
             .channelFactory {
                 channel
             }
-            .protocolNegotiator(GrpcOverProtocolNegotiator(object: GrpcOverProtocolNegotiatorDelegate {
-                override fun scheme(): AsciiString {
-                    return AsciiString("grpcover")
-                }
-
-                override fun newHandler(grpcHandler: GrpcHttp2ConnectionHandler): ChannelHandler {
-                    TODO("Not yet implemented")
-                }
-
-                override fun close() {
-                    TODO("Not yet implemented")
-                }
-            }))
             .addService(sampleService)
+            .apply { negotiator.attachToNettyServerBuilder(this) }
             .build()
         server.start()
         return channel

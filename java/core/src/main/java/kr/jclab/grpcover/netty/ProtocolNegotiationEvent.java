@@ -33,7 +33,7 @@ import javax.annotation.Nullable;
 @Internal
 public final class ProtocolNegotiationEvent {
 
-  static final ProtocolNegotiationEvent DEFAULT =
+  public static final ProtocolNegotiationEvent DEFAULT =
       new ProtocolNegotiationEvent(Attributes.EMPTY, /*security=*/ null);
 
   private final Attributes attributes;
@@ -46,19 +46,19 @@ public final class ProtocolNegotiationEvent {
   }
 
   @Nullable
-  Security getSecurity() {
+  public Security getSecurity() {
     return security;
   }
 
-  Attributes getAttributes() {
+  public Attributes getAttributes() {
     return attributes;
   }
 
-  ProtocolNegotiationEvent withAttributes(Attributes attributes) {
+  public ProtocolNegotiationEvent withAttributes(Attributes attributes) {
     return new ProtocolNegotiationEvent(attributes, this.security);
   }
 
-  ProtocolNegotiationEvent withSecurity(@Nullable Security security) {
+  public ProtocolNegotiationEvent withSecurity(@Nullable Security security) {
     return new ProtocolNegotiationEvent(this.attributes, security);
   }
 
