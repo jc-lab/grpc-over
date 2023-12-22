@@ -9,7 +9,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
@@ -55,12 +54,11 @@ public class GrpcOverWebsocketClientNegotiationHandler extends GrpcNegotiationHa
 
         super.handlerAdded(ctx);
 
-        HttpDecoderConfig httpDecoderConfig = new HttpDecoderConfig();
         if (sslHandler != null) {
             pipeline.addFirst("sslHandler", sslHandler);
-            pipeline.addAfter("sslHandler", "httpClientCodec", new HttpClientCodec(httpDecoderConfig, HttpClientCodec.DEFAULT_PARSE_HTTP_AFTER_CONNECT_REQUEST, HttpClientCodec.DEFAULT_FAIL_ON_MISSING_RESPONSE));
+            pipeline.addAfter("sslHandler", "httpClientCodec", new HttpClientCodec());
         } else {
-            pipeline.addFirst("httpClientCodec", new HttpClientCodec(httpDecoderConfig, HttpClientCodec.DEFAULT_PARSE_HTTP_AFTER_CONNECT_REQUEST, HttpClientCodec.DEFAULT_FAIL_ON_MISSING_RESPONSE));
+            pipeline.addFirst("httpClientCodec", new HttpClientCodec());
         }
         pipeline.addAfter("httpClientCodec", "httpObjectAggregator", new HttpObjectAggregator(8192)); // it is not websocket size
         pipeline.addAfter("httpObjectAggregator", "websocketHandler", new WebSocketClientProtocolHandler(this.webSocketClientHandshaker, false));
