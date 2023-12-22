@@ -43,7 +43,6 @@ dependencies {
 
     implementation("org.slf4j:slf4j-api:2.0.0-alpha7")
 
-    api("com.google.protobuf:protobuf-java:${Version.PROTOBUF}")
     api("io.grpc:grpc-protobuf:${Version.GRPC}")
     api("io.grpc:grpc-stub:${Version.GRPC}")
     api("io.grpc:grpc-core:${Version.GRPC}")
@@ -69,26 +68,6 @@ tasks.getByName<Test>("test") {
 
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "1.8"
-}
-
-protobuf {
-    protoc {
-        artifact = "com.google.protobuf:protoc:${Version.PROTOBUF}"
-    }
-    plugins {
-        id("grpc") {
-            artifact = "io.grpc:protoc-gen-grpc-java:${Version.GRPC}"
-        }
-    }
-
-    generateProtoTasks {
-        ofSourceSet("main").forEach {
-            it.plugins {
-                // Apply the "grpc" plugin whose spec is defined above, without options.
-                id("grpc")
-            }
-        }
-    }
 }
 
 publishing {

@@ -6,6 +6,8 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 
 public class WebSocketFrameByteBufHandler extends ChannelDuplexHandler {
     @Override
@@ -16,9 +18,9 @@ public class WebSocketFrameByteBufHandler extends ChannelDuplexHandler {
                 return;
             }
             super.write(ctx, new BinaryWebSocketFrame((ByteBuf) msg), promise);
-            return;
+        } else {
+            super.write(ctx, msg, promise);
         }
-        super.write(ctx, msg, promise);
     }
 
     @Override
@@ -26,8 +28,14 @@ public class WebSocketFrameByteBufHandler extends ChannelDuplexHandler {
         if (msg instanceof BinaryWebSocketFrame) {
             BinaryWebSocketFrame frame = (BinaryWebSocketFrame) msg;
             super.channelRead(ctx, frame.content());
-            return;
+        } else if (msg instanceof CloseWebSocketFrame) {
+            CloseWebSocketFrame frame = (CloseWebSocketFrame) msg;
+            if (frame.statusCode() != WebSocketCloseStatus.NORMAL_CLOSURE.code()) {
+                ctx.fireExceptionCaught(new WebSocketCloseException(frame.statusCode(), frame.reasonText()));
+            }
+            ctx.close();
+        } else {
+            super.channelRead(ctx, msg);
         }
-        super.channelRead(ctx, msg);
     }
 }

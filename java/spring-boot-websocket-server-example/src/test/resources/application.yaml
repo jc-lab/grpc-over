@@ -1,1 +1,4 @@
 server.port: 11111
+#logging.level:
+#  io.grpc.netty.NettyServerHandler: "DEBUG"
+#  io.grpc.netty.NettyClientHandler: "DEBUG"

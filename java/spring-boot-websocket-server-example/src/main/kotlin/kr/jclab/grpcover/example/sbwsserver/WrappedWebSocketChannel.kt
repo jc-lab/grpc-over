@@ -3,6 +3,7 @@ package kr.jclab.grpcover.example.sbwsserver
 import io.netty.buffer.ByteBuf
 import io.netty.channel.Channel
 import io.netty.channel.ChannelOutboundBuffer
+import io.netty.channel.ChannelPromise
 import io.netty.channel.DefaultChannelId
 import kr.jclab.netty.pseudochannel.AbstractPseudoChannel
 import org.slf4j.LoggerFactory
@@ -15,7 +16,7 @@ class WrappedWebSocketChannel(
     private val webSocketSession: WebSocketSession,
 ) : AbstractPseudoChannel(parent, DefaultChannelId.newInstance()) {
     private val log = LoggerFactory.getLogger(this::class.java)
-    val registerFuture = this.newPromise()
+    val registerPromise: ChannelPromise = this.newPromise()
 
     private enum class State {
         OPEN, ACTIVE, INACTIVE, CLOSED
@@ -36,7 +37,7 @@ class WrappedWebSocketChannel(
     override fun doRegister() {
         super.doRegister()
         state = State.ACTIVE
-        registerFuture.setSuccess()
+        registerPromise.setSuccess()
     }
 
     protected fun deactivate() {
@@ -67,7 +68,6 @@ class WrappedWebSocketChannel(
     private fun doCloseImpl() {
         try {
             if (state != State.CLOSED) {
-                log.info("doClose")
                 if (webSocketSession.isOpen) {
                     webSocketSession.close()
                 }

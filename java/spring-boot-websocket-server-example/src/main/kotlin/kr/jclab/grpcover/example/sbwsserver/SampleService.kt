@@ -11,11 +11,13 @@ class SampleService : SampleServiceGrpc.SampleServiceImplBase() {
         request: SampleProto.HelloRequest,
         responseObserver: StreamObserver<SampleProto.HelloReply>,
     ) {
+        println("[SERVER] helloOnce: " + request.message.length)
         responseObserver.onNext(
             SampleProto.HelloReply.newBuilder()
                 .setMessage("REPLY: " + request.message)
                 .build()
         )
+        Thread.sleep(500)
         responseObserver.onCompleted()
     }
 
@@ -23,6 +25,7 @@ class SampleService : SampleServiceGrpc.SampleServiceImplBase() {
         request: SampleProto.HelloRequest,
         responseObserver: StreamObserver<SampleProto.HelloReply>,
     ) {
+        println("[SERVER] helloMany: " + request.message.length)
         for (i in 0..9) {
             responseObserver.onNext(
                 SampleProto.HelloReply.newBuilder()

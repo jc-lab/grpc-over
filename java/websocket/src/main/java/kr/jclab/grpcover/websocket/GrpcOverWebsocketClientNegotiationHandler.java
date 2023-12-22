@@ -3,11 +3,13 @@ package kr.jclab.grpcover.websocket;
 import io.grpc.Attributes;
 import io.grpc.SecurityLevel;
 import io.grpc.internal.GrpcAttributes;
+import io.grpc.netty.GrpcOverProtocolNegotiationEventAccessor;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
@@ -53,14 +55,15 @@ public class GrpcOverWebsocketClientNegotiationHandler extends GrpcNegotiationHa
 
         super.handlerAdded(ctx);
 
+        HttpDecoderConfig httpDecoderConfig = new HttpDecoderConfig();
         if (sslHandler != null) {
             pipeline.addFirst("sslHandler", sslHandler);
-            pipeline.addAfter("sslHandler", "httpClientCodec", new HttpClientCodec());
+            pipeline.addAfter("sslHandler", "httpClientCodec", new HttpClientCodec(httpDecoderConfig, HttpClientCodec.DEFAULT_PARSE_HTTP_AFTER_CONNECT_REQUEST, HttpClientCodec.DEFAULT_FAIL_ON_MISSING_RESPONSE));
         } else {
-            pipeline.addFirst("httpClientCodec", new HttpClientCodec());
+            pipeline.addFirst("httpClientCodec", new HttpClientCodec(httpDecoderConfig, HttpClientCodec.DEFAULT_PARSE_HTTP_AFTER_CONNECT_REQUEST, HttpClientCodec.DEFAULT_FAIL_ON_MISSING_RESPONSE));
         }
-        pipeline.addAfter("httpClientCodec", "httpObjectAggregator", new HttpObjectAggregator(DEFAULT_MAX_MESSAGE_SIZE));
-        pipeline.addAfter("httpObjectAggregator", "websocketHandler", new WebSocketClientProtocolHandler(this.webSocketClientHandshaker, true));
+        pipeline.addAfter("httpClientCodec", "httpObjectAggregator", new HttpObjectAggregator(8192)); // it is not websocket size
+        pipeline.addAfter("httpObjectAggregator", "websocketHandler", new WebSocketClientProtocolHandler(this.webSocketClientHandshaker, false));
         pipeline.addAfter("websocketHandler", "webSocketFrameByteBufHandler", new WebSocketFrameByteBufHandler());
     }
 
@@ -71,14 +74,22 @@ public class GrpcOverWebsocketClientNegotiationHandler extends GrpcNegotiationHa
     }
 
     @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        System.out.println("channelRead: " + msg.getClass());
+        super.channelRead(ctx, msg);
+    }
+
+    @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         if (evt instanceof WebSocketClientProtocolHandler.ClientHandshakeStateEvent) {
-            Attributes attrs = pne.getAttributes().toBuilder()
+            Attributes attrs = GrpcOverProtocolNegotiationEventAccessor.getAttributes(pne).toBuilder()
                     .set(GrpcAttributes.ATTR_SECURITY_LEVEL, SecurityLevel.NONE)
                     .build();
 
             ctx.pipeline().replace(ctx.name(), null, this.grpcHandler);
-            this.fireProtocolNegotiationEvent(ctx, pne.withAttributes(attrs));
+            this.fireProtocolNegotiationEvent(ctx, GrpcOverProtocolNegotiationEventAccessor.withAttributes(pne, attrs));
+        } else {
+            System.out.println("event: " + evt.getClass());
         }
         super.userEventTriggered(ctx, evt);
     }

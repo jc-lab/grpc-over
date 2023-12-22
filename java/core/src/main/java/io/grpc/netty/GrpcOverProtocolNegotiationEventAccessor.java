@@ -4,6 +4,8 @@ import io.grpc.Attributes;
 import io.grpc.InternalChannelz;
 
 public class GrpcOverProtocolNegotiationEventAccessor {
+    public static final ProtocolNegotiationEvent DEFAULT = ProtocolNegotiationEvent.DEFAULT;
+
     public static Attributes getAttributes(ProtocolNegotiationEvent event) {
         return event.getAttributes();
     }

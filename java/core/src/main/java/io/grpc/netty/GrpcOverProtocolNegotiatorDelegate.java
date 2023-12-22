@@ -4,7 +4,11 @@ import io.netty.channel.ChannelHandler;
 import io.netty.util.AsciiString;
 
 public interface GrpcOverProtocolNegotiatorDelegate {
-    AsciiString scheme();
+    default AsciiString scheme() {
+        return new AsciiString("grpcover");
+    }
+
     ChannelHandler newHandler(ChannelHandler next);
-    void close();
+
+    default void close() {}
 }
