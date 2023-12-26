@@ -51,7 +51,12 @@ public class GrpcOverWebsocketChannelBuilder extends GrpcOverNettyChannelBuilder
 
     public static GrpcOverWebsocketChannelBuilder forTarget(String targetUrl) {
         URI uri = URI.create(targetUrl);
-        SocketAddress address = new InetSocketAddress(uri.getHost(), uri.getPort());
+        int port = uri.getPort();
+        if (port < 0) {
+            port = GrpcOverChannelBuilderHelper.getDefaultPort(uri.getScheme());
+        }
+
+        SocketAddress address = new InetSocketAddress(uri.getHost(), port);
 
         return new GrpcOverWebsocketChannelBuilder(uri, address);
     }

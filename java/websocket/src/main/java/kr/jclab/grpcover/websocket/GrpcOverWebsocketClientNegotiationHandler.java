@@ -3,6 +3,7 @@ package kr.jclab.grpcover.websocket;
 import io.grpc.Attributes;
 import io.grpc.SecurityLevel;
 import io.grpc.internal.GrpcAttributes;
+import io.grpc.netty.GrpcOverChannelBuilderHelper;
 import io.grpc.netty.GrpcOverProtocolNegotiationEventAccessor;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -37,10 +38,14 @@ public class GrpcOverWebsocketClientNegotiationHandler extends GrpcNegotiationHa
         ChannelPipeline pipeline = ctx.pipeline();
 
         String scheme = uri.getScheme().toLowerCase();
+        int port = uri.getPort();
+        if (port < 0) {
+            port = GrpcOverChannelBuilderHelper.getDefaultPort(uri.getScheme());
+        }
         SslHandler sslHandler = scheme.startsWith("wss") ? this.sslContext.newHandler(
                 ctx.channel().alloc(),
                 uri.getHost(),
-                uri.getPort()
+                port
         ) : null;
 
         this.webSocketClientHandshaker = new ContextWriteWebSocketClientHandshaker13(
