@@ -1,11 +1,9 @@
 package kr.jclab.grpcover.example.sbwsserver
 
-import io.netty.buffer.Unpooled
 import io.netty.handler.codec.http2.Http2CodecUtil
 import org.springframework.stereotype.Component
 import org.springframework.web.socket.*
 import org.springframework.web.socket.handler.BinaryWebSocketHandler
-import java.io.EOFException
 
 @Component
 class GrpcWebsocketHandler(
@@ -35,7 +33,16 @@ class GrpcWebsocketHandler(
     override fun handleBinaryMessage(session: WebSocketSession, message: BinaryMessage) {
         val grpcChannel = session.attributes["grpcChannel"] as WrappedWebSocketChannel
         val pipeline = grpcChannel.pipeline()
-        pipeline.fireChannelRead(Unpooled.copiedBuffer(message.payload))
+
+        // DO NOT USE Unpooled
+        // When using unpooled, cause the below exception:
+        // java.lang.IndexOutOfBoundsException: writerIndex(14) + minWritableBytes(8) exceeds maxCapacity(14): UnpooledDuplicatedByteBuf(ridx: 9, widx: 14, cap: 14/14, unwrapped: UnpooledHeapByteBuf(ridx: 9, widx: 14, cap: 14/14))
+        //	at io.netty.handler.codec.ByteToMessageDecoder.channelRead(ByteToMessageDecoder.java:280)
+
+        val buffer = grpcChannel.alloc().heapBuffer(message.payloadLength)
+        buffer.writeBytes(message.payload)
+        pipeline.fireChannelRead(buffer)
+
         pipeline.fireChannelReadComplete()
     }
 }
